@@ -8,3 +8,4 @@ util_c/lib
 
 chain_class_models/*.dat
 toga_modules/__pycache__/
+__pycache__/

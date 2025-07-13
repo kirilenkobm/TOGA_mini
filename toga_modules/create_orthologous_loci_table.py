@@ -10,11 +10,12 @@ import sys
 from collections import defaultdict
 from datetime import datetime as dt
 import ctypes
-from common import chain_extract_id
-from common import make_cds_track
-from common import die
-from common import setup_logger
-from common import to_log
+
+from toga_modules.common import chain_extract_id
+from toga_modules.common import make_cds_track
+from toga_modules.common import die
+from toga_modules.common import setup_logger
+from toga_modules.common import to_log
 
 __author__ = "Bogdan M. Kirilenko"
 

@@ -26,6 +26,8 @@ from toga_modules.filter_bed import prepare_bed_file
 from toga_modules.make_pr_pseudogenes_annotation import create_ppgene_track
 from toga_modules.merge_chains_output import merge_chains_output
 from toga_modules.parallel_jobs_manager_helpers import get_nextflow_dir
+from toga_modules.split_chain_jobs import main as split_chain_jobs_main
+from toga_modules.create_orthologous_loci_table import main as create_orthologous_loci_table_main
 from toga_modules.stitch_fragments import stitch_scaffolds
 from toga_modules.toga_sanity_checks import TogaSanityChecker
 from toga_modules.toga_util import TogaUtil
@@ -307,16 +309,18 @@ class Toga:
         self.BED_BDB_INDEX = os.path.join(
             self.LOCATION, Constants.MODULES_DIR, "bed_hdf5_index.py"
         )
-        self.SPLIT_CHAIN_JOBS = os.path.join(self.LOCATION, Constants.MODULES_DIR, "split_chain_jobs.py")
+        # Remove unused module paths - these are now imported directly
+        # self.SPLIT_CHAIN_JOBS = os.path.join(self.LOCATION, Constants.MODULES_DIR, "split_chain_jobs.py")
         self.MERGE_CHAINS_OUTPUT = os.path.join(
             self.LOCATION, Constants.MODULES_DIR, "merge_chains_output.py"
         )
         self.CLASSIFY_CHAINS = os.path.join(
             self.LOCATION, Constants.MODULES_DIR, "classify_chains.py"
         )
-        self.CREATE_ORTHOLOGOUS_LOCI_TABLE = os.path.join(
-            self.LOCATION, Constants.MODULES_DIR, "create_orthologous_loci_table.py"
-        )
+        # Remove unused module paths - these are now imported directly
+        # self.CREATE_ORTHOLOGOUS_LOCI_TABLE = os.path.join(
+        #     self.LOCATION, Constants.MODULES_DIR, "create_orthologous_loci_table.py"
+        # )
         self.TRANSCRIPT_QUALITY = os.path.join(
             self.LOCATION, Constants.MODULES_DIR, "get_transcripts_quality.py"
         )
@@ -505,22 +509,35 @@ class Toga:
         self.temp_files.append(self.chain_class_results)
         self.temp_files.append(self.chain_cl_jobs_combined)
 
-        split_jobs_cmd = (
-            f"{self.SPLIT_CHAIN_JOBS} "
-            f"{self.chain_file} "
-            f"{self.ref_bed} "
-            f"{self.index_bed_file} "
-            f"--log_file {self.log_file} "
-            f"--parallel_logs_dir {self.log_dir} "
-            f"--jobs_num {self.chain_jobs} "
-            f"--jobs {self.ch_cl_jobs} "
-            f"--jobs_file {self.chain_cl_jobs_combined} "
-            f"--results_dir {self.chain_class_results} "
-            f"--rejected {rejected_path} "
-            f"{'--quiet' if self.quiet else ''}"
-        )
+        # Prepare arguments for direct function call
+        split_jobs_args = [
+            self.chain_file,
+            self.ref_bed,
+            self.index_bed_file,
+            "--log_file", self.log_file,
+            "--parallel_logs_dir", self.log_dir,
+            "--jobs_num", str(self.chain_jobs),
+            "--jobs", self.ch_cl_jobs,
+            "--jobs_file", self.chain_cl_jobs_combined,
+            "--results_dir", self.chain_class_results,
+            "--rejected", rejected_path,
+        ]
+        if self.quiet:
+            split_jobs_args.append("--quiet")
 
-        call_process(split_jobs_cmd, "Could not split chain jobs!")
+        # Call split_chain_jobs directly instead of subprocess
+        try:
+            # Temporarily replace sys.argv to pass arguments to the module
+            original_argv = sys.argv
+            sys.argv = ["split_chain_jobs.py"] + split_jobs_args
+            split_chain_jobs_main()
+        except SystemExit:
+            # split_chain_jobs_main calls sys.exit(0) on success, catch it
+            pass
+        finally:
+            # Restore original sys.argv
+            sys.argv = original_argv
+        
         # collect transcripts aren't intersected at all here
         self._transcripts_not_intersected = get_fst_col(rejected_path)
 
@@ -628,25 +645,38 @@ class Toga:
         skipped_path = os.path.join(self.rejected_dir, "SPLIT_CESAR.txt")
         self.paralogs_log = os.path.join(self.temp_wd, "paralogs.txt")
 
-        create_loci_cmd = (
-            f"{self.CREATE_ORTHOLOGOUS_LOCI_TABLE} "
-            f"{self.transcript_to_chain_classes} {self.ref_bed} "
-            f"{self.index_bed_file} {self.chain_index_file} "
-            f"{self.t_2bit} "
-            f"{self.q_2bit} "
-            f"{self.wd} "
-            f"--chains_limit {self.orthologous_chain_limit} "
-            f"--skipped_genes {skipped_path} "
-            f"--log_file {self.log_file} "
-            f"{'--quiet' if self.quiet else ''}"
-        )
-
-        create_loci_cmd = (
-            create_loci_cmd + " --o2o_only" if self.o2o_only else create_loci_cmd
-        )
+        # Prepare arguments for direct function call
+        create_loci_args = [
+            self.transcript_to_chain_classes,
+            self.ref_bed,
+            self.index_bed_file,
+            self.chain_index_file,
+            self.t_2bit,
+            self.q_2bit,
+            self.wd,
+            "--chains_limit", str(self.orthologous_chain_limit),
+            "--skipped_genes", skipped_path,
+            "--log_file", self.log_file,
+        ]
+        if self.quiet:
+            create_loci_args.append("--quiet")
+        if self.o2o_only:
+            create_loci_args.append("--o2o_only")
         if fragm_dict_file:
-            create_loci_cmd += f" --fragments_data {fragm_dict_file}"
-        call_process(create_loci_cmd, "Could not create orthologous loci table!")
+            create_loci_args.extend(["--fragments_data", fragm_dict_file])
+
+        # Call create_orthologous_loci_table directly instead of subprocess
+        try:
+            # Temporarily replace sys.argv to pass arguments to the module
+            original_argv = sys.argv
+            sys.argv = ["create_orthologous_loci_table.py"] + create_loci_args
+            create_orthologous_loci_table_main()
+        except SystemExit:
+            # create_orthologous_loci_table_main calls sys.exit(0) on success, catch it
+            pass
+        finally:
+            # Restore original sys.argv
+            sys.argv = original_argv
 
     @staticmethod  # todo: to utility class
     def __parse_cesar_buckets(cesar_buckets_arg):

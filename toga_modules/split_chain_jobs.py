@@ -11,11 +11,12 @@ import sys
 import subprocess
 import random
 from datetime import datetime as dt
-from chain_bed_intersect import chain_bed_intersect
-from common import parts
-from common import die
-from common import setup_logger
-from common import to_log
+
+from toga_modules.chain_bed_intersect import chain_bed_intersect
+from toga_modules.common import parts
+from toga_modules.common import die
+from toga_modules.common import setup_logger
+from toga_modules.common import to_log
 
 __author__ = "Bogdan Kirilenko, 2020."
 __email__ = "bogdan.kirilenko@senckenberg.de"

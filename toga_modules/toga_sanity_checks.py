@@ -208,7 +208,6 @@ class TogaSanityChecker:
         files_must_be = [
             toga_cls.CHAIN_BDB_INDEX,
             toga_cls.BED_BDB_INDEX,
-            toga_cls.SPLIT_CHAIN_JOBS,
             toga_cls.MERGE_CHAINS_OUTPUT,
             toga_cls.CLASSIFY_CHAINS,
         ]
