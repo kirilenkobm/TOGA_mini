@@ -10,10 +10,6 @@ from collections import defaultdict
 
 from toga_modules.common import flatten
 
-__author__ = "Bogdan Kirilenko, 2020."
-__email__ = "bogdan.kirilenko@senckenberg.de"
-__credits__ = ["Michael Hiller", "Virag Sharma", "David Jebb"]
-
 
 def grep_chain_headers(chain_file):
     """Throw chain header lines."""
@@ -24,7 +20,7 @@ def grep_chain_headers(chain_file):
 
 
 def parse_chain(chain_file):
-    """Read chain file.
+    """Read the chain file.
 
     For each chromosome save a list of corresponding chains
     and their genomic ranges.
@@ -32,7 +28,7 @@ def parse_chain(chain_file):
     # save dict {chrom: list of (chain_id, start, end)} here:
     chrom_range = defaultdict(list)
     # need chains headers only (lines starting with "chain")
-    # read and process them simultaneously with yield
+    #  to read and process them simultaneously with yield
     header_gen = grep_chain_headers(chain_file)
     for header in header_gen:
         # parse chain headers one-by-one
@@ -87,7 +83,7 @@ def find_first(chains, beds):
         return 0, 0
     if intersect(chains[0], beds[0]) > 0:
         # no need to search
-        # first chain intersects first bed
+        # the first chain intersects the first bed
         return 0, 0
     # get first transcript start and first chain end
     first_bed_start, _ = beds[0][1], beds[0][2]
@@ -96,13 +92,14 @@ def find_first(chains, beds):
     if first_chain_end < first_bed_start:
         # we have lots of chains in the beginning not intersecting beds
         for i in range(len(chains)):
-            # let's go chain-by-chain until we reach first transcript
+            # let's go chain-by-chain until we reach the first transcript
             if intersect(chains[i], beds[0]) > 0:
                 return i, 0
             elif chains[i][1] > beds[0][2]:
                 return i, 1
             else:  # no intersection
                 return 0, 0
+        return None
     else:  # lots of beds in the beginning not covered by chains
         for i in range(len(beds)):
             # go transcript-by-transcript until we reach any chain
@@ -112,6 +109,7 @@ def find_first(chains, beds):
                 return 1, i
             else:  # no intersection
                 return 0, 0
+        return None
 
 
 def overlap(chains, beds):
@@ -128,17 +126,17 @@ def overlap(chains, beds):
 
     if chains_num == 0 or bed_len == 0:
         # check if there are chains and beds on this chrom
-        # if there is no chains and beds: nothing to intersect
+        # if there are no chains and beds: nothing to intersect
         return {}
 
     for i in range(chain_init, chains_num):
-        FLAG = False  # was there an intersection or not?
-        FIRST = True
+        flag = False  # was there an intersection or not?
+        first = True
         chain = chains[i]
         while True:
-            if FIRST:  # start with previous start, first iteration
+            if first:  # start with the previous start, first iteration
                 bed_num = start_with
-                FIRST = False  # guarantee that this condition works ONCE per loop
+                first = False  # guarantee that this condition works ONCE per loop
             else:  # just increase the pointer
                 bed_num += 1  # to avoid inf loop
 
@@ -148,13 +146,13 @@ def overlap(chains, beds):
             bed = beds[bed_num]
 
             if chain[2] < bed[1]:  # too late
-                break  # means that bed is "righter" than chain
+                break  # means that the bed is "righter" than the chain
 
             if intersect(chain, bed) > 0:
-                if not FLAG:  # the FIRST intersection of this chain
+                if not flag:  # the FIRST intersection of this chain
                     start_with = bed_num  # guarantee that I will assign to starts with
                     # only the FIRST intersection (if it took place)
-                    FLAG = True  # otherwise starts with will be preserved
+                    flag = True  # otherwise starts with will be preserved
                 # save the intersection
                 chain_beds[chain[0]].append(bed[0])
 
@@ -165,12 +163,12 @@ def overlap(chains, beds):
                     # gene B               EEEEEEEEEE                            #
                     # gene C                               EEEEEEEEE             #
                     # chain                                    ccccc             #
-                    # at gene A I will get FLAG = True and NO intersection with gene B
+                    # at gene "A" I will get FLAG = True and NO intersection with gene B
                     # --> I will miss gene C in this case without this condition.
                     continue
 
-                elif FLAG:
-                    # this is not a nested gene
+                elif flag:
+                    # this is not a nested gene,
                     # and all intersections are saved
                     # --> proceed to the next chain
                     break
@@ -183,7 +181,7 @@ def chain_bed_intersect(chain, bed):
     Return chain: intersected transcripts dict and
     list of transcripts not intersected by any chain.
     """
-    # get list of chrom: ranges for both
+    # get a list of chrom: ranges for both
     skipped = (
         []
     )  # list of genes that were skipped because they don't intersect any chain
@@ -196,22 +194,22 @@ def chain_bed_intersect(chain, bed):
     # we are interested in the sets intersection only
     # if there is chrom Y in the bed file but not chrom Y in the chain file
     # -> for sure no chrom Y genes would be intersected by any chain
-    chroms = list(set(bed_data.keys()).intersection(chain_data.keys()))
+    chromosomes = list(set(bed_data.keys()).intersection(chain_data.keys()))
     # save transcript IDs that lie on chromosomes not found in the chain file:
-    only_bed_chroms = list(set(bed_data.keys()).difference(chain_data.keys()))
+    only_bed_chromosomes = list(set(bed_data.keys()).difference(chain_data.keys()))
     genes_rejected = [
-        x[0] for x in flatten([bed_data[chr_] for chr_ in only_bed_chroms])
+        x[0] for x in flatten([bed_data[chr_] for chr_ in only_bed_chromosomes])
     ]
     for gene in genes_rejected:
         skipped.append((gene, "chromosome is not aligned"))
 
-    if len(chroms) == 0:  # no chromosomes appear in the bed and the chain file
+    if len(chromosomes) == 0:  # no chromosomes appear in the bed and the chain file
         # for sure there is something wrong with the input data
         sys.exit("Error! No common chromosomes between the bed and chain files found!")
     chain_bed_dict = {}  # dict for result
 
     # main loop
-    for chrom in chroms:
+    for chrom in chromosomes:
         # go chromosome-by-chromosome
         # of course a transcript on the chromosome 1 will never intersect
         # a chain on the chromosome 2

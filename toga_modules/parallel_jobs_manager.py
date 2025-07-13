@@ -4,16 +4,11 @@
 Provides implementations for nextflow and para strategies.
 Please feel free to implement your custom strategy if
 neither nextflow nor para satisfy your needs.
-
-WIP, to be enabled later.
 """
 from abc import ABC, abstractmethod
 import subprocess
 import os
 from toga_modules.common import to_log
-
-__version__ = "Detached"
-__author__ = "Bogdan M. Kirilenko"
 
 
 class ParallelizationStrategy(ABC):
@@ -110,10 +105,10 @@ class NextflowStrategy(ParallelizationStrategy):
             self._process.wait()
 
     def __create_config_file(self):
-        """Create config file and return path to it if needed"""
+        """Create a config file and return a path to it if needed"""
         config_path = None
         if self.use_local_executor:
-            # for local executor, no config file is needed
+            # for the local executor, no config file is needed
             return config_path
         if self.label.startswith(self.CHAIN_JOBS_PREFIX):
             original_config_path = os.path.abspath(os.path.join(self.nextflow_config_dir,
@@ -129,7 +124,7 @@ class NextflowStrategy(ParallelizationStrategy):
         return config_path  # using local executor again
 
     def check_status(self):
-        """Check if nextflow jobs are done."""
+        """Check if the nextflow jobs are done."""
         if self.return_code:
             return self.return_code
         running = self._process.poll() is None

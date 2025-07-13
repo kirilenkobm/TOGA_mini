@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Create orthologous loci table.
+"""Create an orthologous loci table.
 
 According to predicted orthologous chains create a table with
 transcript ID, chain ID, and query region coordinates.
 """
 import os
-import sys
 from collections import defaultdict
 from datetime import datetime as dt
 import ctypes
@@ -106,7 +105,7 @@ def read_orthologs(orthologs_file, only_o2o=False, annotate_paralogs=False):
         to_log(f"* selected chain class to annotate transcript {transcript}: {selected_field}")
 
         selected = chains[selected_field].copy()
-        # mark used field
+        # mark a used field
         for chain in selected:
             key = (chain, transcript)
             chain_gene_field[key] = selected_field
@@ -152,9 +151,9 @@ def read_bed(bed):
 
 
 def precompute_regions(
-    batch, bed_data, bdb_chain_file, chain_gene_field, limit, q_2bit
+    batch, bed_data, bdb_chain_file, chain_gene_field, limit
 ):
-    """Precompute region for each chain: bed pair."""
+    """Precompute a region for each chain: bed pair."""
     to_log(f"{MODULE_NAME_FOR_LOG}: precomputing query regions for each transcript/chain pair")
     to_log(f"{MODULE_NAME_FOR_LOG}: batch size: {len(batch)}")
     chain_to_genes, skipped = defaultdict(list), []
@@ -210,7 +209,7 @@ def precompute_regions(
         # for now we have chain blocks coordinates and gene
         # regions in the reference genome
         # use chain_coords_converter shared library to
-        # convert target -> query coordinates via chain
+        # convert target -> query coordinates via a chain
         # first need to convert to C-types
         c_chain = ctypes.c_char_p(chain_body)
         c_shift = ctypes.c_int(1)
@@ -313,8 +312,8 @@ def create_orthologous_loci_table(
     bed_file, 
     bdb_bed_file, 
     bdb_chain_file, 
-    tDB, 
-    qDB, 
+    target_two_bit,
+    query_two_bit,
     toga_out_dir,
     chains_limit=15,
     skipped_genes=None,
@@ -331,8 +330,8 @@ def create_orthologous_loci_table(
         bed_file: BED FILE
         bdb_bed_file: BDB BED FILE
         bdb_chain_file: BDB CHAIN FILE
-        tDB: target 2 bit
-        qDB: query 2 bit
+        target_two_bit: target 2 bit
+        query_two_bit: query 2 bit
         toga_out_dir: Toga output directory
         chains_limit: Skip genes with amount of orthologs more than the limit
         skipped_genes: If a gene was skipped due to number of chains limit, save it into a file
@@ -351,8 +350,8 @@ def create_orthologous_loci_table(
     to_log(f"* bed_file: {bed_file}")
     to_log(f"* bdb_bed_file: {bdb_bed_file}")
     to_log(f"* bdb_chain_file: {bdb_chain_file}")
-    to_log(f"* tDB: {tDB}")
-    to_log(f"* qDB: {qDB}")
+    to_log(f"* tDB: {target_two_bit}")
+    to_log(f"* qDB: {query_two_bit}")
     to_log(f"* toga_out_dir: {toga_out_dir}")
     to_log(f"* chains_limit: {chains_limit}")
     to_log(f"* skipped_genes: {skipped_genes}")
@@ -381,7 +380,6 @@ def create_orthologous_loci_table(
         bdb_chain_file,
         chain_gene_field,
         chains_limit,
-        qDB,
     )
 
     # Create orthologous loci table directly from precomputed regions

@@ -3,7 +3,7 @@
 
 Chain features extraction steps results in numerous files.
 This script merges these files and then
-builds s table containing chain features.
+builds a table containing chain features.
 """
 import argparse
 import os
@@ -16,8 +16,6 @@ from toga_modules.common import die
 from toga_modules.common import read_isoforms_file
 from toga_modules.common import to_log
 from toga_modules.common import setup_logger
-
-__author__ = "Bogdan M. Kirilenko"
 
 t0 = dt.now()
 
@@ -75,19 +73,19 @@ def read_bed_data(bed_file):
             die(f"Error! Bed12 file {bed_file} is corrupted!")
 
         # extract fields that we need
-        chromStart = int(all_bed_info[1])  # gene start
-        chromEnd = int(all_bed_info[2])  # and end
+        chrom_start = int(all_bed_info[1])  # gene start
+        chrom_end = int(all_bed_info[2])  # and end
         # blocks represent exons
-        all_blockSizes = [int(x) for x in all_bed_info[10].split(",") if x != ""]
-        cds_blockSizes = [int(x) for x in cds_bed_info[10].split(",") if x != ""]
+        all_block_sizes = [int(x) for x in all_bed_info[10].split(",") if x != ""]
+        cds_block_sizes = [int(x) for x in cds_bed_info[10].split(",") if x != ""]
         # data to save
-        gene_len = abs(chromStart - chromEnd)
+        gene_len = abs(chrom_start - chrom_end)
 
-        # for decision tree I will need number of exons
+        # for decision tree I will need a number of exons
         # and number of bases in exonic and intronic fractions
-        exons_num = len(all_blockSizes)
-        exon_fraction = sum(all_blockSizes)  # including UTR
-        cds_fraction = sum(cds_blockSizes)  # CDS only
+        exons_num = len(all_block_sizes)
+        exon_fraction = sum(all_block_sizes)  # including UTR
+        cds_fraction = sum(cds_block_sizes)  # CDS only
         intron_fraction = gene_len - exon_fraction
         gene_name = all_bed_info[3]
 
@@ -166,7 +164,6 @@ def load_results(results_dir):
         for line in f:
             # read file line-by-line, all fields are tab-separated
             line_data = line.rstrip().split("\t")
-            # define the class of this line
             # a line could be either gene or chain-related
             if line_data[0] == "genes":
                 # process as a gene line
@@ -300,7 +297,7 @@ def merge_chains_output(
         _, isoforms, _ = read_isoforms_file(isoforms_file)
     else:
         isoforms = None
-    # read result files from unit
+    # read result files from the unit
     chain_genes_data, chain_raw_data = load_results(results_dir)
     # I need this dict reverted actually
     # not chain-genes-data but gene-chains-data

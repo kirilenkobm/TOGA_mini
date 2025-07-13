@@ -11,14 +11,12 @@ import re
 from collections import Counter
 
 from toga_modules.common import die
-from toga_modules.common import eprint
 from toga_modules.common import to_log
-
-__author__ = "Bogdan Kirilenko, 2023."
 
 ALLOWED_CHARSET = "a-zA-Z0-9._-"
 ALLOWED_CHARSET_RE = rf"[^{ALLOWED_CHARSET}]"
 MODULE_NAME_FOR_LOG = "filter_bed"
+
 
 def parse_args():
     """Read args, check."""
@@ -41,10 +39,10 @@ def parse_args():
     return args
 
 
-def prepare_bed_file(bed_file, output, ouf=False, save_rejected=None, only_chrom=None):
+def prepare_bed_file(bed_file, output, save_rejected=None, only_chrom=None):
     """Filter the bed file given and save the updated version."""
     new_lines = []  # keep updated lines
-    rejected = []  # keep IDs of skipped transcripts + the reason why
+    rejected = []  # keep IDs of skipped transcripts and the reason why
     names = Counter()  # we need to make sure that all names are unique
     allowed_re = re.compile(ALLOWED_CHARSET_RE).search
     broken_names = []
@@ -63,14 +61,14 @@ def prepare_bed_file(bed_file, output, ouf=False, save_rejected=None, only_chrom
 
         chrom = line_data[0]
         if only_chrom and chrom != only_chrom:
-            # TOGA allows to perform the analysis on a specific chromosome only
+            # TOGA allows performing the analysis on a specific chromosome only
             # is so, we can skip all transcripts that located on other chromosomes
             continue
         chrom_start = int(line_data[1])
         chrom_end = int(line_data[2])
         name = line_data[3]  # gene_name usually
         corr_name = not bool(allowed_re(name))
-        if corr_name is False:
+        if not corr_name:
             broken_names.append(name)
         # TODO: check weird characters in the transcript name
         # bed_score = int(line_data[4])  # never used
@@ -89,7 +87,7 @@ def prepare_bed_file(bed_file, output, ouf=False, save_rejected=None, only_chrom
         names[name] += 1
 
         if thick_start > thick_end:
-            f.close()  # according to bed12 specification this should never happen
+            f.close()  # according to bed12 specification, this should never happen
             err_msg = (
                 f"{MODULE_NAME_FOR_LOG}: Error! Bed file is corrupted, thickEnd MUST be >= thickStart.\n"
                 f"Problem occurred at line {num}, gene {name}"
@@ -118,37 +116,34 @@ def prepare_bed_file(bed_file, output, ouf=False, save_rejected=None, only_chrom
         # we keep UTRs in the filtered file
         # however, we need CDS to check whether it's correct (% 3 == 0)
         for block_num in range(block_count):
-            blockStart = block_abs_starts[block_num]
-            blockEnd = block_abs_ends[block_num]
+            block_start = block_abs_starts[block_num]
+            block_end = block_abs_ends[block_num]
 
             # skip the block if it is entirely UTR
-            if blockEnd <= thick_start:
+            if block_end <= thick_start:
                 continue
-            elif blockStart >= thick_end:
+            elif block_start >= thick_end:
                 continue
 
             # if we are here: this is not an entirely UTR exon
             # it might intersect the CDS border or to be in the CDS entirely
             # remove UTRs: block start must be >= CDS_start (thickStart)
-            # block end must be <= CDS_end (thickEnd)
-            block_new_start = blockStart if blockStart >= thick_start else thick_start
-            block_new_end = blockEnd if blockEnd <= thick_end else thick_end
+            # the block end must be <= CDS_end (thickEnd)
+            block_new_start = block_start if block_start >= thick_start else thick_start
+            block_new_end = block_end if block_end <= thick_end else thick_end
             block_new_starts.append(block_new_start - thick_start)
             block_new_ends.append(block_new_end - thick_start)
 
         if len(block_new_starts) == 0:
-            # even it thickStart != thickEnd this transcript still can be non-coding
+            # even it thickStart != thickEnd this transcript still can be non-coding,
             # but if there are no blocks in the CDS -> we can catch this
             warn_msg = f"{MODULE_NAME_FOR_LOG}: transcript {name} skipped: no CDS"
             to_log(warn_msg)
             continue
 
-        block_new_count = len(block_new_starts)
-        block_new_sizes = [
-            block_new_ends[i] - block_new_starts[i] for i in range(block_new_count)
-        ]
 
         # FINE FOR RNA
+        # block_new_count = len(block_new_starts)
         # if sum(block_new_sizes) % 3 != 0 and not ouf:
         #     # this is an out-of-frame (or incomplete transcript)
         #     # ideally CDS length should be divisible by 3
@@ -171,8 +166,7 @@ def prepare_bed_file(bed_file, output, ouf=False, save_rejected=None, only_chrom
         err_msg = f"{MODULE_NAME_FOR_LOG}: Allowed characters are: {ALLOWED_CHARSET}"
         to_log(err_msg)
         die(err_msg)
-    # if there are non-unique transcript IDs: die
-    # I kill it there, not earlier to show them altogether
+    # if there are non-unique transcript IDs: die, not earlier to show them altogether
     if any(v > 1 for v in names.values()):
         err_msg = f"{MODULE_NAME_FOR_LOG}: Error! There are non-uniq transcript IDs:"
         to_log(err_msg)
@@ -194,7 +188,7 @@ def prepare_bed_file(bed_file, output, ouf=False, save_rejected=None, only_chrom
     f.close() if output != "stdout" else None
 
     if save_rejected:
-        # save transcripts that didn't pass the filter + reason why
+        # save transcripts that didn't pass the filter and reason why
         f = open(save_rejected, "w")
         for elem in rejected:
             f.write(f"{elem[0]}\t{elem[1]}\n")
@@ -204,7 +198,7 @@ def prepare_bed_file(bed_file, output, ouf=False, save_rejected=None, only_chrom
 def main():
     """Entry point."""
     args = parse_args()
-    prepare_bed_file(args.input, args.output, args.out_of_frame)
+    prepare_bed_file(args.input, args.output)
     sys.exit(0)
 
 

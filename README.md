@@ -4,7 +4,10 @@ Lightweight version of [TOGA](https://github.com/hillerlab/TOGA),
 published in [Science (2023)](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC10193443/), 
 designed for rapid orthologous locus prediction from alignment chains.
 
+
 Unlike full TOGA, TOGA-mini focuses solely on predicting orthologous loci for any gene type, including protein-coding genes, lncRNAs, or custom annotations. This leaves downstream analysis (e.g., realignment, ORF prediction) flexible and customizable.
+
+**Note: TOGA-mini is not versioned in sync with full TOGA.**
 
 ## 🚀 Features
 

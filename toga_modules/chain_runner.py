@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Script to run chain classification job.
+"""Script to run a chain classification job.
 
-Extract features from each chain to gene intersection.
+Extract features from each chain to a gene intersection.
 Loads a list of chain: genes tasks and calls
 modules.processor.unit for each chain: genes task.
 """
@@ -81,7 +81,7 @@ def extract_chain(chain_file, chain_dict, chain):
 
 
 def check_args(
-    chain_id, genes, chain_file, chain_dict, bed_file, verbose_level, work_data, result
+    chain_id, genes, chain_file, chain_dict, bed_file, work_data, result
 ):
     """Check if arguments are correct, extract initial data if so."""
     work_data["chain_id"] = chain_id
@@ -118,7 +118,7 @@ def check_args(
 
 def read_input(input_file):
     """Read input."""
-    # it must be chain TAB genes line
+    # it must be a chain TAB genes line
     if os.path.isfile(input_file):
         tasks = {}
         f = open(input_file)
@@ -140,11 +140,11 @@ def read_input(input_file):
             'list or a "chain<space>[comma-separated list of genes]" formatted-file'
         )
         die(err_msg)
-        return
+        return None
 
 
 def bed12_to_ranges(bed):
-    """Convert bed-12 file to set of sorted ranges."""
+    """Convert a bed-12 file to a set of sorted ranges."""
     ranges_unsort, chrom = [], None
     for line in bed.split("\n")[:-1]:
         # parse line and extract blocks
@@ -179,12 +179,12 @@ def bedcov_ranges(ranges, chrom):
             ranges_filtered.append(ranges[i])
         else:  # intersect - add merged range to the pointer
             # pointer = pointer - don't move it
-            # replace the last range with merged last + new one
+            # replaces the last range with merged last + new one
             nested = True  # at least one pair intersected
             ranges_filtered[pointer] = marge_ranges(ranges_filtered[pointer], ranges[i])
 
     # chr | start | end | gene | - bed4 structure
-    # now make bed4 file
+    # now makes bed4 file
     exons, template = [], "{0}\t{1}\t{2}\t{3}\n"
     for grange in ranges_filtered:
         exons.append(template.format(chrom, grange[0], grange[1], gene))
@@ -221,7 +221,7 @@ def get_tot_exons_track(work_data):
 
 def collapse_exons(work_data):
     """Compensate nested genes."""
-    # how bed12 looks like:
+    # what the bed12 looks like:
     # chr15	19964665	19988117	O	1000	+	19964665	19988117
     # 0,0,0	3	307,46,313,	0,390,22990,
     # I need to fill it with chrom, start and end and blocks info
@@ -292,14 +292,6 @@ def extend_bed_lines(bed_lines):
     return bed_lines_extended
 
 
-# def cound_cds_exons(bed_lines_extended):
-#     """Count CDS exons in each gene/transcript."""
-#     bed_lines = [x.rstrip().split("\t") for x in bed_lines_extended.split("\n") if x != ""]
-#     cds_lines = [x for x in bed_lines if x[3].endswith("_CDS")]
-#     ret = {x[3][:-4]: int(x[9]) for x in cds_lines}
-#     return ret
-
-
 def get_features(work_data, result, bed_lines_extended, nested=False):
     """Compute local exon overlap score.
 
@@ -332,7 +324,7 @@ def get_features(work_data, result, bed_lines_extended, nested=False):
     chain_cds_bases = 0  # summarize global set here
 
     for gene in work_data["genes"]:
-        # pick the data from overlap select table
+        # pick the data from the overlap select table
         blocks_v_exons = local_exo_dict[gene]
         blocks_v_cds = local_exo_dict[gene + "_CDS"]
         blocks_v_gene = local_exo_dict[gene + "_grange"]
@@ -359,7 +351,7 @@ def get_features(work_data, result, bed_lines_extended, nested=False):
         # global counters
         # CDS bases increase with blocks V cds in the gene
         chain_cds_bases += blocks_v_cds
-        # increase number of UTR exons
+        # increase the number of UTR exons
         # chain_utr_exon_bases += blocks_v_utr_exons
 
         # get local results
@@ -402,7 +394,7 @@ def get_features(work_data, result, bed_lines_extended, nested=False):
         result["Exlen_to_Qlen"] = (
             chain_cds_bases / q_len_corrected if q_len_corrected != 0 else 0
         )
-    else:  # if chain covers at most 1 CDS exon -> this feature is not applicable
+    else:  # if the chain covers at most 1 CDS exon -> this feature is not applicable
         result["Exlen_to_Qlen"] = 0
     assert result["Exlen_to_Qlen"] <= 1  # blocklen / qlen cannot be > 1
 
@@ -455,7 +447,7 @@ def extended_output(result, t0):
 
 
 def chain_feat_extractor(
-    chain_id, transcripts, chain_file, bed_file, chain_dict, verbose_arg=None, extended=False
+    chain_id, transcripts, chain_file, bed_file, chain_dict, extended=False
 ):
     """Chain features extractor entry point."""
     # global vars
@@ -485,14 +477,13 @@ def chain_feat_extractor(
         "gene_overlaps": [],
         "Exlen_to_Qlen": 0,
     }
-    # check if all the files, dependencies etc are correct
+    # check if all the files, dependencies, etc. are correct
     check_args(
         chain_id,
         transcripts,
         chain_file,
         chain_dict,
         bed_file,
-        verbose_arg,
         work_data,
         result,
     )
@@ -505,7 +496,7 @@ def chain_feat_extractor(
     nested = check_nest(work_data, cds_bed_lines)  # check if the genes are nested
 
     if not nested:
-        # 99% cases go here
+        # 99% of cases go here
         # there are no nested genes
         get_features(work_data, result, bed_lines_extended)
     else:
@@ -555,7 +546,6 @@ def main():
             args.chain_file,
             args.bed_file,
             chain_dict,
-            verbose_arg=args.verbose,
             extended=args.extended,
         )
         chain_output, genes_output, time_output = unit_output

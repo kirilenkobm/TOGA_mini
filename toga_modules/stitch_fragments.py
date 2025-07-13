@@ -1,7 +1,4 @@
 #!/usr/bin/env python3
-"""
-
-"""
 import argparse
 import sys
 from datetime import datetime as dt
@@ -12,14 +9,11 @@ from toga_modules.common import to_log
 from toga_modules.common import make_cds_track
 from toga_modules.common import flatten
 
-# artificial 0-scored points
 SOURCE = "SOURCE"
 SINK = "SINK"
 SCORE_THRESHOLD = 0.5
 EXON_COV_THRESHOLD = 1.33
-MAX_OVERLAP = 250  # TODO: check whether 250 is a good option
-
-__author__ = "Ekaterina Osipova & Bogdan M. Kirilenko"
+MAX_OVERLAP = 250
 
 
 class Vertex:
@@ -32,9 +26,9 @@ class Vertex:
         self.score = score
         self.children = list()
 
-    def add_child(self, v):
-        if v not in self.children:
-            self.children.append(v)
+    def add_child(self, vertex):
+        if vertex not in self.children:
+            self.children.append(vertex)
 
 
 class Graph:
@@ -59,18 +53,18 @@ class Graph:
         else:
             return False
 
-    def topological_sort_util(self, v, visited, stack):
+    def topological_sort_util(self, vertex, visited, stack):
         """Perform Depth First Search
 
         Mark the current node as visited.
         """
-        visited[v] = True
+        visited[vertex] = True
         # check all children of this vertex if they're visited
-        for i in self.vertices[v].children:
+        for i in self.vertices[vertex].children:
             if visited[i] is False:
                 self.topological_sort_util(i, visited, stack)
         # add current vertex to stack
-        stack.insert(0, v)
+        stack.insert(0, vertex)
 
     def topological_sort(self):
         """Perform topological sort.
@@ -78,13 +72,13 @@ class Graph:
         Use recursive function topological_sort_util().
         Mark all the vertices as not visited.
         """
-        visited = {v: False for v in self.vertices}
+        visited = {vert: False for vert in self.vertices}
         # initiate stack to store sorted vertices
         stack = []
         for vertex in self.vertices:
-            if visited[vertex] is False:
+            if not visited[vertex]:
                 self.topological_sort_util(vertex, visited, stack)
-        # return sorted list of vertices
+        # return a sorted list of vertices
         return stack
 
     def __repr__(self):
@@ -114,8 +108,7 @@ def parse_args():
     if len(sys.argv) < 3:
         app.print_help()
         sys.exit(0)
-    args = app.parse_args()
-    return args
+    return app.parse_args()
 
 
 def read_gene_scores(score_file):
@@ -203,8 +196,8 @@ def build_chain_graph(chain_id_to_loc, intersecting_chains_wscores):
         start, end = chain_id_to_loc.get(chain_id, (None, None))
         if start is None:
             raise ValueError(f"Cannot find chain {chain_id}")
-        v = Vertex(chain_id, start, end, -1 * score)
-        chain_graph.add_vertex(v)
+        vertex = Vertex(chain_id, start, end, -1 * score)
+        chain_graph.add_vertex(vertex)
 
     # add edges to the chain graph
     for i in chain_graph.vertices:
@@ -321,13 +314,13 @@ def stitch_scaffolds(chain_file, chain_scores_file, bed_file, fragments_only=Fal
     # chain_id_to_loc dictionary
     # transcript score dict: gene_id: [(chain, score), (chain, score), ...]
     # Iterate over dict values (lists of tuples), get the 1st elem of each tuple (chain_id)
-    orth_chains = set(
-        flatten([v[0] for v in vals] for vals in transcript_score_dict.values())
+    orthologous_chains = set(
+        flatten([val[0] for val in vals] for vals in transcript_score_dict.values())
     )
-    to_log(f"stitch fragments: processing total of {len(orth_chains)} chains with scores")
+    to_log(f"stitch fragments: processing total of {len(orthologous_chains)} chains with scores")
     chain_id_to_loc__no_filt = read_chain_file(chain_file)
     chain_id_to_loc = {
-        k: v for k, v in chain_id_to_loc__no_filt.items() if k in orth_chains
+        key: val for key, val in chain_id_to_loc__no_filt.items() if key in orthologous_chains
     }
     genes_to_exon_coords = read_gene_loci(bed_file)
     transcript_to_path = {}
@@ -354,7 +347,7 @@ def stitch_scaffolds(chain_file, chain_scores_file, bed_file, fragments_only=Fal
             intersecting_chains, chain_id_to_loc, exon_coords
         )
         chain_id_covers_all = {
-            k: all(v for v in val) for k, val in chain_id_to_exon_cov.items()
+            key: all(val for val in vals) for key, vals in chain_id_to_exon_cov.items()
         }
         if any(chain_id_covers_all.values()):
             # if there is a chain that covers the transcript entirely: skip this

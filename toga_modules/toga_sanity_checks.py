@@ -45,7 +45,7 @@ class TogaSanityChecker:
         # TODO: consider other scenario
 
     @staticmethod
-    def check_2bit_file_completeness(two_bit_file, chroms_sizes, chrom_file):
+    def check_2bit_file_completeness(two_bit_file, chromosome_sizes, chrom_file):
         """Check that the 2bit file is readable."""
         try:  # try to catch EOFError: if 2bitreader cannot read file
             two_bit_reader = TwoBitFile(two_bit_file)
@@ -56,23 +56,23 @@ class TogaSanityChecker:
         except EOFError as err:  # this is a file but twobit reader couldn't read it
             raise ValueError(str(err))
         # another check: that bed or chain chromosomes intersect 2bit file sequences
-        check_chroms = set(chroms_sizes.keys())  # chroms in the input file
-        intersection = twobit_sequences.intersection(check_chroms)
-        chroms_not_in_2bit = check_chroms.difference(twobit_sequences)
+        check_chromosomes = set(chromosome_sizes.keys())  # chroms in the input file
+        intersection = twobit_sequences.intersection(check_chromosomes)
+        # chroms_not_in_2bit = check_chroms.difference(twobit_sequences)
 
-        if len(chroms_not_in_2bit) > 0:
-            missing_top_100 = list(chroms_not_in_2bit)[:100]
-            missing_str = "\n".join(missing_top_100)
-            err = (
-                f"Error! 2bit file: {two_bit_file}; chain/bed file: {chrom_file}; "
-                f"Some chromosomes present in the chain/bed file are not found in the "
-                f"Two bit file. First <=100: {missing_str}"
-            )
+        # if len(chroms_not_in_2bit) > 0:
+        #     missing_top_100 = list(chroms_not_in_2bit)[:100]
+        #     missing_str = "\n".join(missing_top_100)
+        #     err = (
+        #         f"Error! 2bit file: {two_bit_file}; chain/bed file: {chrom_file}; "
+        #         f"Some chromosomes present in the chain/bed file are not found in the "
+        #         f"Two bit file. First <=100: {missing_str}"
+        #     )
             # raise ValueError(err)
         # check that sizes also match
         for chrom in intersection:
             twobit_seq_len = twobit_seq_to_size[chrom]
-            comp_file_seq_len = chroms_sizes[chrom]
+            comp_file_seq_len = chromosome_sizes[chrom]
             # if None: this is from bed file: cannot compare
             if comp_file_seq_len is None:
                 continue
@@ -103,7 +103,7 @@ class TogaSanityChecker:
         isoforms_file = os.path.join(temp_wd, "isoforms.tsv")
         # this set contains isoforms found in the isoforms file
         t_in_i = set(isoform_to_gene.keys())
-        # there are transcripts that appear in bed but not in the isoforms file
+        # there are transcripts that appear in bed but not in the isoform file
         # if this set is non-empty: raise an error
         u_in_b = t_in_bed.difference(t_in_i)
 

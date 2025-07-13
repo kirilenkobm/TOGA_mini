@@ -1,13 +1,9 @@
 """Python replacement for overlapSelect.
 
 For a chain and a set of genes returns the following:
-gene: how many bases this chain overlap in exons.
+gene: how many bases this chain overlaps in exons.
 """
 from collections import defaultdict
-
-__author__ = "Bogdan Kirilenko, 2020."
-__email__ = "bogdan.kirilenko@senckenberg.de"
-__credits__ = ["Michael Hiller", "Virag Sharma", "David Jebb"]
 
 
 def make_bed_ranges(bed_line):
@@ -87,14 +83,14 @@ def overlap_select(bed, chain):
     for block in chain_reader(chain):
         # add to len
         chain_len += block[1] - block[0]  # block[1] - block[0] is block length
-        FLAG = False  # was there an intersection or not?
-        FIRST = True
+        flag = False  # was there an intersection or not?
+        first = True
         bed_num = 0
 
         while True:
-            if FIRST:  # start with previous start, first iteration
+            if first:  # start with the previous start, first iteration
                 bed_num = start_with
-                FIRST = False  # guarantee that this condition works ONCE per loop
+                first = False  # guarantee that this condition works ONCE per loop
             else:  # just increase the pointer
                 bed_num += 1  # to avoid inf loop
 
@@ -109,13 +105,13 @@ def overlap_select(bed, chain):
             # get intersection between the chain block and exon
             block_vs_exon = intersect(block, (exon[0], exon[1]))
             if block_vs_exon > 0:  # they intersect
-                if not FLAG:  # the FIRST intersection of this chain block
+                if not flag:  # the FIRST intersection of this chain block
                     # shift the start: all exons left-side will never be reached
 
                     # guarantee that I will assign to starts with
                     # only the FIRST intersection (if it took place)
                     start_with = bed_num
-                    FLAG = True  # otherwise starts_with will be preserved
+                    flag = True  # otherwise starts_with will be preserved
                 # add the intersection size
                 bed_overlaps[exon[2]] += block_vs_exon
                 bed_covered_times[exon[2]].add(exon[0])
@@ -131,7 +127,7 @@ def overlap_select(bed, chain):
                     # --> I would miss gene C in this case without this condition.
                     continue
 
-                elif FLAG:  # this is not a nested gene
+                elif flag:  # this is not a nested gene
                     break  # and all intersections are saved --> proceed to the next chain
 
     # return the required values

@@ -2,10 +2,10 @@
 """Save chain index file.
 
 Chain index is just a BST saved into a separate file.
-Using this index file for any chain ID we can extract:
+Using this index file for any chain ID, we can extract:
 1) Start byte of this chain in the chain file
 2) Length of this chain in the file.
-And then simply extract it.
+And then extract it.
 """
 import sys
 import os
@@ -18,7 +18,7 @@ SLIB_NAME = "libchain_bst_lib.dylib"
 
 
 def chain_bst_index(chain_file, index_file, txt_index=None):
-    """Create index file for chain."""
+    """Create an index file for the chain."""
     # assume that shared lib is in the same dir
     script_location = os.path.dirname(__file__)
     slib_location = os.path.join(script_location, "..", "util_c", "lib", SLIB_NAME)
@@ -72,8 +72,8 @@ def chain_bst_index(chain_file, index_file, txt_index=None):
 
     if txt_index:
         # save text (non-binary) dict for chain ids and positions in the file
-        # in some cases this is more efficient that extracting data from BST
-        # via shared library
+        # in some cases this is more efficient than extracting data from BST
+        # via a shared library
         f = open(txt_index, "w")
         for x in zip(chain_ids, start_bytes, offsets):
             f.write(f"{x[0]}\t{x[1]}\t{x[2]}\n")

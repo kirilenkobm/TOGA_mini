@@ -14,7 +14,7 @@ __author__ = "Bogdan M. Kirilenko"
 
 def bed_hdf5_index(in_bed, out_db):
     # read the bed file
-    f = open(in_bed, "r")  # assume each bed line has unique name (field 3)
+    f = open(in_bed, "r")  # assume each bed line has a unique name (field 3)
     h = h5py.File(out_db, "w")
     lines_counter = 0
     for line in f:
@@ -24,7 +24,7 @@ def bed_hdf5_index(in_bed, out_db):
     f.close()
     h.close()
 
-    if lines_counter == 0:  # meaning bed file was empty
+    if lines_counter == 0:  # meaning a bed file was empty
         # this should not happen: halt TOGA
         to_log(f"bed_hdf5_index: Error! Input file {in_bed} is empty! Aborted.\n")
         sys.exit(1)

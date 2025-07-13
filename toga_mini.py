@@ -22,7 +22,7 @@ from toga_modules.common import make_symlink
 from toga_modules.common import setup_logger
 from toga_modules.common import to_log
 from toga_modules.filter_bed import prepare_bed_file
-from toga_modules.make_pr_pseudogenes_annotation import create_ppgene_track
+from toga_modules.make_pr_pseudogenes_annotation import create_processed_pseudogenes_track
 from toga_modules.merge_chains_output import merge_chains_output
 from toga_modules.parallel_jobs_manager_helpers import get_nextflow_dir
 from toga_modules.split_chain_jobs import split_chain_jobs
@@ -153,7 +153,7 @@ class Toga:
         prepare_bed_file(
             args.bed_input,
             self.ref_bed,
-            ouf=False,  # TODO: check whether we like to include this parameter
+            # TODO: check whether we like to include this parameter
             save_rejected=bed_filter_rejected,
             only_chrom=args.limit_to_ref_chrom,
         )
@@ -574,7 +574,7 @@ class Toga:
         """Create annotation of processed genes in the query."""
         to_log("Creating processed pseudogenes track.")
         processed_pseudogenes_track = os.path.join(self.wd, "proc_pseudogenes.bed")
-        create_ppgene_track(
+        create_processed_pseudogenes_track(
             self.pred_scores, self.chain_file, self.index_bed_file, processed_pseudogenes_track
         )
 
@@ -609,8 +609,8 @@ class Toga:
             bed_file=self.ref_bed,
             bdb_bed_file=self.index_bed_file,
             bdb_chain_file=self.chain_index_file,
-            tDB=self.t_2bit,
-            qDB=self.q_2bit,
+            target_two_bit=self.t_2bit,
+            query_two_bit=self.q_2bit,
             toga_out_dir=self.wd,
             chains_limit=self.orthologous_chain_limit,
             skipped_genes=skipped_path,

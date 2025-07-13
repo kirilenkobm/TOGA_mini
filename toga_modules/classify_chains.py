@@ -219,7 +219,7 @@ def classify_chains(
 
     # create a different TSV
     # transcript: lists of different chain classes
-    # such as transcript A: [orthologous chains] [paralogous chains] etc
+    # such as transcript A: [orthologous chains] [paralogous chains] etc.
     # 0 -> placeholder, means "the class if empty"
     gene_class_chains = {}
     transcripts = set(overall_result["gene"])
