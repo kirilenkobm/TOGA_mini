@@ -10,11 +10,6 @@ import sys
 from collections import defaultdict
 import bsddb3
 
-__author__ = "Bogdan Kirilenko, 2020."
-__version__ = "1.0"
-__email__ = "kirilenk@mpi-cbg.de"
-__credits__ = ["Michael Hiller", "Virag Sharma", "David Jebb"]
-
 
 def chain_bdb_index(inchain, outbdb):
     current_chain = 0  # initiate current_chain variable

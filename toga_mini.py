@@ -37,7 +37,7 @@ from toga_modules.parallel_jobs_manager import ParallelJobsManager
 
 __author__ = "Bogdan M. Kirilenko"
 __github__ = "https://github.com/kirilenkobm"
-__version__ = "Detached"
+__version__ = "Mini"
 
 LOCATION = os.path.dirname(__file__)
 
@@ -47,13 +47,13 @@ class Toga:
     def __init__(self, args):
         """Initiate toga class."""
         self.t0 = dt.now()
-        # define project name
+        # define the project name
         if args.project_dir:
             _dirname = os.path.dirname(args.project_dir)
             self.project_name = os.path.basename(_dirname)
         else:
             self.project_name = TogaUtil.generate_project_name()
-        # create project dir
+        # create a project dir
         self.wd: str = (  # had to add annotation to supress typing warnings in PyCharm 2023.3
             os.path.abspath(args.project_dir)
             if args.project_dir
@@ -131,7 +131,7 @@ class Toga:
             )
         elif args.no_chain_filter:  # it is .chain and score filter is not required
             chain_filter_cmd = f"rsync -a {args.chain_input} {self.chain_file}"
-        else:  # it is .chain | score filter required
+        else:  # it is .chain | a score filter required
             chain_filter_cmd = (
                 f"{self.CHAIN_SCORE_FILTER} {args.chain_input} "
                 f"{args.min_score} > {self.chain_file}"
@@ -143,8 +143,8 @@ class Toga:
         )
 
         # bed define bed files addresses
-        self.ref_bed = os.path.join(self.temp_wd, "toga_filt_ref_annot.bed")
-        self.index_bed_file = os.path.join(self.temp_wd, "toga_filt_ref_annot.hdf5")
+        self.ref_bed = os.path.join(self.temp_wd, "toga_filtered_reference_annottation.bed")
+        self.index_bed_file = os.path.join(self.temp_wd, "toga_filtered_reference_annottation.hdf5")
 
         # filter bed file
         bed_filter_rejected_file = "BED_FILTER_REJECTED.txt"
@@ -160,7 +160,7 @@ class Toga:
 
         # mics things
         self.isoforms_arg = args.isoforms if args.isoforms else None
-        self.isoforms = None  # will be assigned after completeness check
+        self.isoforms = None  # will be assigned after a completeness check
         self.chain_jobs = args.chain_jobs_num
         self.time_log = args.time_marks
         self.rejected_log = os.path.join(self.wd, "genes_rejection_reason.tsv")
@@ -170,18 +170,17 @@ class Toga:
         self.t_2bit = self.__find_two_bit(args.tDB)
         self.q_2bit = self.__find_two_bit(args.qDB)
 
-        self.hq_orth_threshold = 0.95
-        self.orth_chain_limit = args.orth_chain_limit
+        self.orthologous_chain_limit = args.orthologous_chain_limit
         self.o2o_only = args.o2o_only
         self.keep_nf_logs = args.do_not_del_nf_logs
         self.ld_model_arg = args.ld_model
 
         self.fragmented_genome = False if args.disable_fragments_joining else True
-        self.orth_score_threshold = args.orth_score_threshold
-        if self.orth_score_threshold < 0.0 or args.orth_score_threshold > 1.0:
+        self.orthology_score_threshold = args.orthology_score_threshold
+        if self.orthology_score_threshold < 0.0 or args.orthology_score_threshold > 1.0:
             self.die(
                 "orth_score_threshold parameter must be in range [0..1], got "
-                f"{self.orth_score_threshold}; Abort"
+                f"{self.orthology_score_threshold}; Abort"
             )
 
         self.chain_results_df = os.path.join(self.wd, "chain_features.tsv")
@@ -199,7 +198,7 @@ class Toga:
 
         self.__check_param_files()
 
-        # create symlinks to 2bits: let user know what 2bits were used
+        # create symlinks to 2bits: let the user know what 2bits were used
         self.t_2bit_link = os.path.join(self.wd, "t2bit.link")
         self.q_2bit_link = os.path.join(self.wd, "q2bit.link")
         make_symlink(self.t_2bit, self.t_2bit_link)
@@ -211,7 +210,7 @@ class Toga:
         self.version_file = os.path.join(self.wd, "version.txt")
 
         with open(self.toga_params_file, "w") as f:
-            # default=string is a workaround to serialize datetime object
+            # default=string is a workaround to serialize a datetime object
             json.dump(self.__dict__, f, default=str)
         with open(self.toga_args_file, "w") as f:
             json.dump(vars(args), f, default=str)
@@ -248,7 +247,7 @@ class Toga:
         ]
         for item in files_to_check:
             if not item:
-                # this file just not given
+                # this file just isn't given
                 continue
             elif not os.path.isfile(item):
                 self.die(f"Error! File {item} not found!")
@@ -259,7 +258,7 @@ class Toga:
             t_in_bed = set(x[3] for x in lines)
             chroms_in_bed = set(x[0] for x in lines)
             # 2bit check function accepts a dict chrom: size
-            # from bed12 file we cannot infer sequence length
+            # from a bed12 file we cannot infer sequence length
             # None is just a placeholder that indicated that we don't need
             # to compare chrom lengths with 2bit
             chrom_sizes_in_bed = {x: None for x in chroms_in_bed}
@@ -278,7 +277,7 @@ class Toga:
         """Show msg in stderr, exit with the rc given."""
         to_log(msg)
         to_log(f"Program finished with exit code {rc}\n")
-        # for t_file in self.temp_files:  # remove temp files if required
+        # for t_file in self.temp_files: # remove temp files if required
         #     os.remove(t_file) if os.path.isfile(t_file) and not self.keep_temp else None
         #     shutil.rmtree(t_file) if os.path.isdir(t_file) and not self.keep_temp else None
         self.__mark_crashed()
@@ -315,8 +314,8 @@ class Toga:
         self.CLASSIFY_CHAINS = os.path.join(
             self.LOCATION, Constants.MODULES_DIR, "classify_chains.py"
         )
-        self.SPLIT_EXON_REALIGN_JOBS = os.path.join(
-            self.LOCATION, Constants.MODULES_DIR, "split_exon_realign_jobs.py"
+        self.CREATE_ORTHOLOGOUS_LOCI_TABLE = os.path.join(
+            self.LOCATION, Constants.MODULES_DIR, "create_orthologous_loci_table.py"
         )
         self.TRANSCRIPT_QUALITY = os.path.join(
             self.LOCATION, Constants.MODULES_DIR, "get_transcripts_quality.py"
@@ -375,13 +374,13 @@ class Toga:
         elif os.path.islink(with_alias):
             return os.path.abspath(os.readlink(with_alias))
         self.die(f"Two bit file {db} not found! Abort")
+        return None
 
     def run(self, up_to_and_incl: Optional[int] = None) -> None:
         """Run TOGA from start to finish"""
         # 0) preparation:
-        # define the project name and mkdir for it
-        # move chain file filtered
-        # define initial values
+        # define the project name and mkdir for it,
+        # move a chain file filtered, define initial values,
         # make indexed files for the chain
         self.__mark_start()
         to_log("\n\n#### STEP 0: making chain and bed file indexes\n")
@@ -390,7 +389,7 @@ class Toga:
         self.__time_mark("Made indexes")
         if up_to_and_incl is not None and up_to_and_incl == 0: return None
 
-        # 1) make joblist for chain features extraction
+        # 1) make a joblist for chain features extraction
         to_log("\n\n#### STEP 1: Generate extract chain features jobs\n")
         self.__split_chain_jobs()
         self.__time_mark("Split chain jobs")
@@ -417,19 +416,19 @@ class Toga:
         if up_to_and_incl is not None and up_to_and_incl == 4: return None
 
         # 5) create cluster jobs for CESAR2.0
-        to_log("\n\n#### STEP 5: Generate CESAR jobs")
+        to_log("\n\n#### STEP 5: Create orthologous loci table")
         # experimental feature, not publically available:
-        self.__split_cesar_jobs()
-        self.__time_mark("Split cesar jobs done")
+        self.__create_orthologous_loci_table()
+        self.__time_mark("Orthologous loci table created")
         if up_to_and_incl is not None and up_to_and_incl == 5: return None
 
-        # 6) Create bed track for processed pseudogenes
+        # 6) Create a bed track for processed pseudogenes
         to_log("\n\n#### STEP 6: Create processed pseudogenes track\n")
         self.__create_processed_pseudogenes_track()
         return None
 
     def __collapse_logs(self, prefix):
-        """Merge logfiles starting with prefix into a single log."""
+        """Merge logfiles starting with the prefix into a single log."""
         log_filenames_with_prefix = [x for x in os.listdir(self.log_dir) if x.startswith(prefix)]
         log_f = open(self.log_file, "a")
         for log_filename in log_filenames_with_prefix:
@@ -442,7 +441,7 @@ class Toga:
         log_f.close()
 
     def __mark_start(self):
-        """Indicate that TOGA process have started."""
+        """Indicate that a TOGA process has started."""
         p_ = os.path.join(self.wd, Constants.RUNNING)
         f = open(p_, "w")
         now_ = str(dt.now())
@@ -450,7 +449,7 @@ class Toga:
         f.close()
 
     def __mark_crashed(self):
-        """Indicate that TOGA process died."""
+        """Indicate that the TOGA process died."""
         running_f = os.path.join(self.wd, Constants.RUNNING)
         crashed_f = os.path.join(self.wd, Constants.CRASHED)
         os.remove(running_f) if os.path.isfile(running_f) else None
@@ -460,7 +459,7 @@ class Toga:
         f.close()
 
     def __make_indexed_chain(self):
-        """Make chain index file."""
+        """Make a chain index file."""
         # make *.bb file
         to_log("Started chain indexing...")
         self.temp_files.append(self.chain_index_file)
@@ -491,7 +490,7 @@ class Toga:
     def __split_chain_jobs(self):
         """Wrap split_jobs.py script."""
         # define arguments
-        # save split jobs
+        #  to save split jobs
         self.ch_cl_jobs = os.path.join(self.temp_wd, "chain_classification_jobs")
         # for raw results of this stage
         self.chain_class_results = os.path.join(
@@ -522,7 +521,7 @@ class Toga:
         )
 
         call_process(split_jobs_cmd, "Could not split chain jobs!")
-        # collect transcripts not intersected at all here
+        # collect transcripts aren't intersected at all here
         self._transcripts_not_intersected = get_fst_col(rejected_path)
 
     def __extract_chain_features(self):
@@ -564,7 +563,7 @@ class Toga:
         # .append(self.chain_results_df)  -> UCSC plugin needs that
 
     def __classify_chains(self):
-        """Run decision tree."""
+        """Run the decision tree."""
         # define input and output."""
         to_log("Classifying chains")
         self.transcript_to_chain_classes = os.path.join(self.temp_wd, "trans_to_chain_classes.tsv")
@@ -587,7 +586,7 @@ class Toga:
             self.me_model,
             rejected=cl_rej_log,
             raw_out=self.pred_scores,
-            annot_threshold=self.orth_score_threshold,
+            annot_threshold=self.orthology_score_threshold,
             ld_model=ld_arg_,
         )
         # extract not classified transcripts
@@ -596,15 +595,15 @@ class Toga:
         TogaSanityChecker.check_chains_classified(self.chain_results_df)
 
     def __create_processed_pseudogenes_track(self):
-        """Create annotation of processed genes in query."""
+        """Create annotation of processed genes in the query."""
         to_log("Creating processed pseudogenes track.")
         processed_pseudogenes_track = os.path.join(self.wd, "proc_pseudogenes.bed")
         create_ppgene_track(
             self.pred_scores, self.chain_file, self.index_bed_file, processed_pseudogenes_track
         )
 
-    def __split_cesar_jobs(self):
-        """Call split_exon_realign_jobs.py."""
+    def __create_orthologous_loci_table(self):
+        """Call create_orthologous_loci_table.py."""
         if self.fragmented_genome:
             to_log("Detecting fragmented transcripts")
             # need to stitch fragments together
@@ -623,67 +622,31 @@ class Toga:
             to_log("Skip fragmented genes detection")
             fragm_dict_file = None
 
-        # if we call CESAR
-        to_log("Setting up creating CESAR jobs")
-        self.cesar_jobs_dir = os.path.join(self.temp_wd, "cesar_jobs")
-        self.cesar_combined = os.path.join(self.temp_wd, "cesar_combined")
-        self.cesar_results = os.path.join(self.temp_wd, "cesar_results")
-
-        self.temp_files.append(self.cesar_jobs_dir)
-        self.temp_files.append(self.cesar_combined)
-        self.temp_files.append(self.predefined_glp_cesar_split)
-
-        # different field names depending on --ml flag
-        self.temp_files.append(self.cesar_results)
+        # create orthologous loci table
+        to_log("Creating orthologous loci table")
+        
         skipped_path = os.path.join(self.rejected_dir, "SPLIT_CESAR.txt")
         self.paralogs_log = os.path.join(self.temp_wd, "paralogs.txt")
 
-        split_cesar_cmd = (
-            f"{self.SPLIT_EXON_REALIGN_JOBS} "
+        create_loci_cmd = (
+            f"{self.CREATE_ORTHOLOGOUS_LOCI_TABLE} "
             f"{self.transcript_to_chain_classes} {self.ref_bed} "
             f"{self.index_bed_file} {self.chain_index_file} "
             f"{self.t_2bit} "
             f"{self.q_2bit} "
             f"{self.wd} "
-            f"--jobs_dir {self.cesar_jobs_dir} "
-            f"--jobs_num {self.cesar_jobs_num} "
-            f"--combined {self.cesar_combined} "
-            f"--results {self.cesar_results} "
-            f"--buckets {self.__list_to_comma_separated_str(self.cesar_buckets)} "
-            f"--mem_limit {self.cesar_mem_limit} "
-            f"--chains_limit {self.orth_chain_limit} "
+            f"--chains_limit {self.orthologous_chain_limit} "
             f"--skipped_genes {skipped_path} "
-            f"--rejected_log {self.rejected_dir} "
-            f"--cesar_binary NONE "
-            f"--paralogs_log {self.paralogs_log} "
-            f"--predefined_glp_class_path {self.predefined_glp_cesar_split} "
-            f"--unprocessed_log {self.technical_cesar_err} "
             f"--log_file {self.log_file} "
-            f"--cesar_logs_dir {self.log_dir} "
             f"{'--quiet' if self.quiet else ''}"
         )
 
-        if self.annotate_paralogs:  # very rare occasion
-            split_cesar_cmd += f" --annotate_paralogs"
-        if self.mask_all_first_10p:
-            split_cesar_cmd += f" --mask_all_first_10p"
-        split_cesar_cmd = (
-            split_cesar_cmd + " --mask_stops" if self.mask_stops else split_cesar_cmd
+        create_loci_cmd = (
+            create_loci_cmd + " --o2o_only" if self.o2o_only else create_loci_cmd
         )
-        split_cesar_cmd = (
-            split_cesar_cmd + f" --u12 {self.u12}" if self.u12 else split_cesar_cmd
-        )
-        split_cesar_cmd = (
-            split_cesar_cmd + " --o2o_only" if self.o2o_only else split_cesar_cmd
-        )
-        split_cesar_cmd = (
-            split_cesar_cmd + " --no_fpi" if self.no_fpi else split_cesar_cmd
-        )
-        if self.gene_loss_data:
-            split_cesar_cmd += f" --check_loss {self.gene_loss_data}"
         if fragm_dict_file:
-            split_cesar_cmd += f" --fragments_data {fragm_dict_file}"
-        call_process(split_cesar_cmd, "Could not split CESAR jobs!")
+            create_loci_cmd += f" --fragments_data {fragm_dict_file}"
+        call_process(create_loci_cmd, "Could not create orthologous loci table!")
 
     @staticmethod  # todo: to utility class
     def __parse_cesar_buckets(cesar_buckets_arg):
@@ -812,18 +775,18 @@ def parse_args(arg_strs: list[str] = None):
         ),
     )
     app.add_argument(
-        "--orth_score_threshold",
+        "--orthology_score_threshold",
         "--ost",
         default=0.5,
         type=float,
         help="Score threshold to distinguish orthologs from paralogs, default 0.5",
     )
     app.add_argument(
-        "--orth_chain_limit",
+        "--orthologous_chain_limit",
         type=int,
         default=100,
         help=(
-            "Skip genes that have more that ORTH_CHAIN_LIMIT orthologous "
+            "Skip genes that have more that ORTHOLOGOUS_CHAIN_LIMIT orthologous "
             "chains. Recommended values are a 50-100."
         )
     )

@@ -5,16 +5,11 @@ from itertools import islice
 from twobitreader import TwoBitFile
 
 from toga_modules.constants import Constants
-from toga_modules.common import to_log, call_process
+from toga_modules.common import to_log
 from toga_modules.common import read_isoforms_file
-
-__author__ = "Bogdan M. Kirilenko, 2024"
-__github__ = "https://github.com/kirilenkobm"
-
 
 SANITY_CHECKER_PREFIX = "SANITY_CHECKER"
 U12_FILE_COLS = 3
-U12_AD_FIELD = {"A", "D"}
 
 
 class TogaSanityChecker:
@@ -99,8 +94,8 @@ class TogaSanityChecker:
         if not isoforms_arg:
             to_log("Continue without isoforms file: not provided")
             return None  # not provided: nothing to check
-        # isoforms file provided: need to check correctness and completeness
-        # then check isoforms file itself
+        # isoform file provided: need to check correctness and completeness
+        # then check isoform file itself
         _, isoform_to_gene, header = read_isoforms_file(isoforms_arg)
         header_maybe_gene = header[0]  # header is optional, if not the case: first field is a gene
         header_maybe_trans = header[1]  # and the second is the isoform
@@ -151,7 +146,7 @@ class TogaSanityChecker:
                 return sum(1 for _ in islice(f, 2)) > 1
 
         is_complete = has_more_than_one_line(chain_results_df)
-        if is_complete is False:
+        if not is_complete:
             msg = f"Chain results file {chain_results_df} is empty! Abort."
             to_log(msg)
             raise ValueError(msg)
@@ -216,7 +211,6 @@ class TogaSanityChecker:
             toga_cls.SPLIT_CHAIN_JOBS,
             toga_cls.MERGE_CHAINS_OUTPUT,
             toga_cls.CLASSIFY_CHAINS,
-            toga_cls.SPLIT_EXON_REALIGN_JOBS,
         ]
         for _file in files_must_be:
             if os.path.isfile(_file):

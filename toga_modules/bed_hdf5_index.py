@@ -6,7 +6,6 @@ for a particular transcript ID immediately.
 """
 import sys
 import os
-import numpy as np
 import h5py
 from toga_modules.common import to_log
 
@@ -38,7 +37,7 @@ if __name__ == "__main__":
     try:  # read arguments
         in_bed_arg = sys.argv[1]
         out_db_arg = sys.argv[2]
-    except IndexError:  # not enough arguments: show usage message and quit
+    except IndexError:  # not enough arguments: show a usage message and quit
         sys.stderr.write("Usage: {0} [in_bed] [out_hdf5]\n".format(sys.argv[0]))
         sys.exit(0)
     bed_hdf5_index(in_bed_arg, out_db_arg)

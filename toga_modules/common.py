@@ -7,8 +7,6 @@ from collections import defaultdict
 import logging
 import h5py
 
-__author__ = "Bogdan M. Kirilenko"
-
 SLIB_NAME = "libchain_bst_lib.dylib"
 ISOFORMS_FILE_COLS = 2
 
@@ -288,26 +286,8 @@ def load_chain_dict(chain_index_file):
     return ans
 
 
-# def get_graph_components(graph):
-#     """Split graph in connected components."""
-#     nx_v = nx.__version__
-#     # could crash if x.y.z
-#     # or something like 3.aplha
-#     v_split = [x for x in nx_v.split(".") if x.isnumeric()]
-#     # TODO: fix it, it is not OK
-#     if len(v_split) > 1:
-#         f_s_nums = float(f"{v_split[0]}.{v_split[1]}")
-#     else:
-#         f_s_nums = float(v_split[0])
-#     if f_s_nums < 2.4:  # old networkx versions
-#         graph_components = list(nx.connected_component_subgraphs(graph))
-#     else:  # modern networkx versions
-#         graph_components = [graph.subgraph(c) for c in nx.connected_components(graph)]
-#     return graph_components
-
-
 def read_isoforms_file(isoforms_file, pre_def_trans_list=None):
-    """Read isoforms file.
+    """Read isoform file.
 
     Return gene: [isoforms] dict and
     isoforms: gene dict.
@@ -317,7 +297,7 @@ def read_isoforms_file(isoforms_file, pre_def_trans_list=None):
     if not os.path.isfile(isoforms_file):
         die(f"Error! Isoforms file {isoforms_file} not found")
     f = open(isoforms_file, "r")
-    # first line could be a header, or may be not
+    # the first line could be a header or may be not
     # process it separately just in case
     header_fields = f.__next__().rstrip().split("\t")
     header_gene = header_fields[0]
