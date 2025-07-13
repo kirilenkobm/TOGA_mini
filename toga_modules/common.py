@@ -7,7 +7,9 @@ from collections import defaultdict
 import logging
 import h5py
 
-SLIB_NAME = "libchain_bst_lib.dylib"
+from toga_modules.toga_util import TogaUtil
+
+SLIB_NAME = f"libchain_bst_lib{TogaUtil.get_shared_lib_extension()}"
 ISOFORMS_FILE_COLS = 2
 
 

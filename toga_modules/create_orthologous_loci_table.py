@@ -29,8 +29,9 @@ SPAN = "SPAN"
 MODULE_NAME_FOR_LOG = "create_orthologous_loci_table"
 
 # connect shared lib; define input and output data types
+from toga_modules.toga_util import TogaUtil
 chain_coords_conv_lib_path = os.path.join(
-    LOCATION, "..", "util_c", "lib", "libchain_coords_converter_slib.dylib"
+    LOCATION, "..", "util_c", "lib", f"libchain_coords_converter_slib{TogaUtil.get_shared_lib_extension()}"
 )
 
 ch_lib = ctypes.CDLL(chain_coords_conv_lib_path)

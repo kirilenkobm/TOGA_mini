@@ -1,5 +1,6 @@
 """Utility class for Toga manager."""
 import sys
+import platform
 from datetime import datetime as dt
 
 from toga_modules.common import to_log
@@ -17,6 +18,17 @@ class TogaUtil:
     def log_python_version():
         to_log(f"# python interpreter path: {sys.executable}")
         to_log(f"# python interpreter version: {sys.version}")
+
+    @staticmethod
+    def get_shared_lib_extension():
+        """Return the appropriate shared library extension for the current platform."""
+        system = platform.system().lower()
+        if system == "darwin":  # macOS
+            return ".dylib"
+        elif system == "windows":
+            return ".dll"
+        else:  # Linux and other Unix-like systems
+            return ".so"
 
     @staticmethod
     def terminate_parallel_processes(jobs_managers):

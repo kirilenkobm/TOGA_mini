@@ -11,10 +11,11 @@ import sys
 import os
 import ctypes
 from toga_modules.common import to_log
+from toga_modules.toga_util import TogaUtil
 
 __author__ = "Bogdan M. Kirilenko"
 
-SLIB_NAME = "libchain_bst_lib.dylib"
+SLIB_NAME = f"libchain_bst_lib{TogaUtil.get_shared_lib_extension()}"
 
 
 def chain_bst_index(chain_file, index_file, txt_index=None):

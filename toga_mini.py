@@ -286,20 +286,21 @@ class Toga:
     def __modules_addr(self):
         """Define addresses of modules."""
         self.LOCATION = os.path.dirname(__file__)  # folder containing pipeline scripts
+        lib_ext = TogaUtil.get_shared_lib_extension()
         self.CHAIN_SCORE_FILTER = os.path.join(
             self.LOCATION, Constants.C_BIN_DIR, "chain_score_filter"
         )
         self.CHAIN_COORDS_CONVERT_LIB = os.path.join(
-            self.LOCATION, Constants.C_LIB_DIR, "chain_coords_converter_slib.dylib"
+            self.LOCATION, Constants.C_LIB_DIR, f"chain_coords_converter_slib{lib_ext}"
         )
         self.EXTRACT_SUBCHAIN_LIB = os.path.join(
-            self.LOCATION, Constants.C_LIB_DIR, "extract_subchain_slib.dylib"
+            self.LOCATION, Constants.C_LIB_DIR, f"extract_subchain_slib{lib_ext}"
         )
         self.CHAIN_FILTER_BY_ID = os.path.join(
             self.LOCATION, Constants.C_BIN_DIR, "chain_filter_by_id"
         )
         self.CHAIN_INDEX_SLIB = os.path.join(
-            self.LOCATION, Constants.C_LIB_DIR, "chain_bst_lib.dylib"
+            self.LOCATION, Constants.C_LIB_DIR, f"chain_bst_lib{lib_ext}"
         )
         self.BED_BDB_INDEX = os.path.join(
             self.LOCATION, Constants.MODULES_DIR, "bed_hdf5_index.py"
