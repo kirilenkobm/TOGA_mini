@@ -78,7 +78,6 @@ class Toga:
         self.cluster_queue_name = args.cluster_queue_name
 
         self.toga_exe_path = os.path.dirname(__file__)
-        TogaUtil.log_python_version()
         self.version = "DETACHED TOGA"
         TogaSanityChecker.check_args_correctness(self, args)
         self.__modules_addr()
