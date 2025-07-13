@@ -10,12 +10,9 @@ And then extract it.
 import sys
 import os
 import ctypes
-from toga_modules.common import to_log
-from toga_modules.toga_util import TogaUtil
+from toga_modules.common import to_log, get_shared_lib_extension
 
-__author__ = "Bogdan M. Kirilenko"
-
-SLIB_NAME = f"libchain_bst_lib{TogaUtil.get_shared_lib_extension()}"
+SLIB_NAME = f"libchain_bst_lib{get_shared_lib_extension()}"
 
 
 def chain_bst_index(chain_file, index_file, txt_index=None):

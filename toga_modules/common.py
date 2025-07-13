@@ -6,11 +6,20 @@ import ctypes
 from collections import defaultdict
 import logging
 import h5py
+import platform
 
-from toga_modules.toga_util import TogaUtil
-
-SLIB_NAME = f"libchain_bst_lib{TogaUtil.get_shared_lib_extension()}"
 ISOFORMS_FILE_COLS = 2
+
+
+def get_shared_lib_extension():
+    """Return the appropriate shared library extension for the current platform."""
+    system = platform.system().lower()
+    if system == "darwin":  # macOS
+        return ".dylib"
+    elif system == "windows":
+        return ".dll"
+    else:  # Linux and other Unix-like systems
+        return ".so"
 
 
 def parts(lst, n=3):
@@ -169,7 +178,8 @@ def chain_extract_id(index_file, chain_id, chain_file=None):
     # connect a shared library
     # .so must be there: in the modules/ dir
     script_location = os.path.dirname(__file__)
-    slib_location = os.path.join(script_location, "..", "util_c", "lib", SLIB_NAME)
+    slib_name = f"libchain_bst_lib{get_shared_lib_extension()}"
+    slib_location = os.path.join(script_location, "..", "util_c", "lib", slib_name)
     sh_lib = ctypes.CDLL(slib_location)
     sh_lib.get_s_byte.argtypes = [
         ctypes.c_char_p,

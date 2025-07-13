@@ -21,6 +21,8 @@ from toga_modules.common import get_fst_col
 from toga_modules.common import make_symlink
 from toga_modules.common import setup_logger
 from toga_modules.common import to_log
+from toga_modules.common import get_shared_lib_extension
+
 from toga_modules.filter_bed import prepare_bed_file
 from toga_modules.make_pr_pseudogenes_annotation import create_processed_pseudogenes_track
 from toga_modules.merge_chains_output import merge_chains_output
@@ -285,7 +287,7 @@ class Toga:
     def __modules_addr(self):
         """Define addresses of modules."""
         self.LOCATION = os.path.dirname(__file__)  # folder containing pipeline scripts
-        lib_ext = TogaUtil.get_shared_lib_extension()
+        lib_ext = get_shared_lib_extension()
         self.CHAIN_SCORE_FILTER = os.path.join(
             self.LOCATION, Constants.C_BIN_DIR, "chain_score_filter"
         )

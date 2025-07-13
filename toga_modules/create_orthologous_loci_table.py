@@ -14,6 +14,7 @@ from toga_modules.common import make_cds_track
 from toga_modules.common import die
 from toga_modules.common import setup_logger
 from toga_modules.common import to_log
+from toga_modules.common import get_shared_lib_extension
 
 __author__ = "Bogdan M. Kirilenko"
 
@@ -31,7 +32,7 @@ MODULE_NAME_FOR_LOG = "create_orthologous_loci_table"
 # connect shared lib; define input and output data types
 from toga_modules.toga_util import TogaUtil
 chain_coords_conv_lib_path = os.path.join(
-    LOCATION, "..", "util_c", "lib", f"libchain_coords_converter_slib{TogaUtil.get_shared_lib_extension()}"
+    LOCATION, "..", "util_c", "lib", f"libchain_coords_converter_slib{get_shared_lib_extension()}"
 )
 
 ch_lib = ctypes.CDLL(chain_coords_conv_lib_path)
