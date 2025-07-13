@@ -14,9 +14,6 @@ dependencies:
   - h5py
   - nextflow
   - bsddb3
-  - cmake
-  - make
-  - gcc
   - pkg-config
   - pip
   - pip:

@@ -7,7 +7,6 @@ If you need to call TOGA: most likely this is what you need.
 import argparse
 import json
 import os
-import shutil
 import sys
 import time
 from datetime import datetime as dt
@@ -26,8 +25,8 @@ from toga_modules.filter_bed import prepare_bed_file
 from toga_modules.make_pr_pseudogenes_annotation import create_ppgene_track
 from toga_modules.merge_chains_output import merge_chains_output
 from toga_modules.parallel_jobs_manager_helpers import get_nextflow_dir
-from toga_modules.split_chain_jobs import main as split_chain_jobs_main
-from toga_modules.create_orthologous_loci_table import main as create_orthologous_loci_table_main
+from toga_modules.split_chain_jobs import split_chain_jobs
+from toga_modules.create_orthologous_loci_table import create_orthologous_loci_table
 from toga_modules.stitch_fragments import stitch_scaffolds
 from toga_modules.toga_sanity_checks import TogaSanityChecker
 from toga_modules.toga_util import TogaUtil
@@ -488,34 +487,19 @@ class Toga:
         self.temp_files.append(self.chain_class_results)
         self.temp_files.append(self.chain_cl_jobs_combined)
 
-        # Prepare arguments for direct function call
-        split_jobs_args = [
-            self.chain_file,
-            self.ref_bed,
-            self.index_bed_file,
-            "--log_file", self.log_file,
-            "--parallel_logs_dir", self.log_dir,
-            "--jobs_num", str(self.chain_jobs),
-            "--jobs", self.ch_cl_jobs,
-            "--jobs_file", self.chain_cl_jobs_combined,
-            "--results_dir", self.chain_class_results,
-            "--rejected", rejected_path,
-        ]
-        if self.quiet:
-            split_jobs_args.append("--quiet")
-
-        # Call split_chain_jobs directly instead of subprocess
-        try:
-            # Temporarily replace sys.argv to pass arguments to the module
-            original_argv = sys.argv
-            sys.argv = ["split_chain_jobs.py"] + split_jobs_args
-            split_chain_jobs_main()
-        except SystemExit:
-            # split_chain_jobs_main calls sys.exit(0) on success, catch it
-            pass
-        finally:
-            # Restore original sys.argv
-            sys.argv = original_argv
+        skipped = split_chain_jobs(
+            chain_file=self.chain_file,
+            bed_file=self.ref_bed,
+            bed_index=self.index_bed_file,
+            log_file=self.log_file,
+            parallel_logs_dir=self.log_dir,
+            jobs_num=self.chain_jobs,
+            jobs=self.ch_cl_jobs,
+            jobs_file=self.chain_cl_jobs_combined,
+            results_dir=self.chain_class_results,
+            rejected=rejected_path,
+            quiet=self.quiet
+        )
         
         # collect transcripts aren't intersected at all here
         self._transcripts_not_intersected = get_fst_col(rejected_path)
@@ -624,38 +608,21 @@ class Toga:
         skipped_path = os.path.join(self.rejected_dir, "SPLIT_CESAR.txt")
         self.paralogs_log = os.path.join(self.temp_wd, "paralogs.txt")
 
-        # Prepare arguments for direct function call
-        create_loci_args = [
-            self.transcript_to_chain_classes,
-            self.ref_bed,
-            self.index_bed_file,
-            self.chain_index_file,
-            self.t_2bit,
-            self.q_2bit,
-            self.wd,
-            "--chains_limit", str(self.orthologous_chain_limit),
-            "--skipped_genes", skipped_path,
-            "--log_file", self.log_file,
-        ]
-        if self.quiet:
-            create_loci_args.append("--quiet")
-        if self.o2o_only:
-            create_loci_args.append("--o2o_only")
-        if fragm_dict_file:
-            create_loci_args.extend(["--fragments_data", fragm_dict_file])
-
-        # Call create_orthologous_loci_table directly instead of subprocess
-        try:
-            # Temporarily replace sys.argv to pass arguments to the module
-            original_argv = sys.argv
-            sys.argv = ["create_orthologous_loci_table.py"] + create_loci_args
-            create_orthologous_loci_table_main()
-        except SystemExit:
-            # create_orthologous_loci_table_main calls sys.exit(0) on success, catch it
-            pass
-        finally:
-            # Restore original sys.argv
-            sys.argv = original_argv
+        create_orthologous_loci_table(
+            orthologs_file=self.transcript_to_chain_classes,
+            bed_file=self.ref_bed,
+            bdb_bed_file=self.index_bed_file,
+            bdb_chain_file=self.chain_index_file,
+            tDB=self.t_2bit,
+            qDB=self.q_2bit,
+            toga_out_dir=self.wd,
+            chains_limit=self.orthologous_chain_limit,
+            skipped_genes=skipped_path,
+            o2o_only=self.o2o_only,
+            fragments_data=fragm_dict_file,
+            log_file=self.log_file,
+            quiet=self.quiet
+        )
 
 
 def parse_args(arg_strs: list[str] = None):

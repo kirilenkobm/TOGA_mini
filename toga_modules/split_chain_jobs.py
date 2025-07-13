@@ -296,6 +296,90 @@ def save(template, batch, logs_dir=None):
     f.close()
 
 
+def split_chain_jobs(
+    chain_file,
+    bed_file,
+    bed_index,
+    log_file=None,
+    quiet=False,
+    parallel_logs_dir=None,
+    jobs_num=800,
+    job_size=None,
+    jobs="chain_classification_jobs",
+    jobs_file="jobs_file",
+    results_dir="results",
+    errors_dir=None,
+    make_index=False,
+    index_file=None,
+    ref="hg38",
+    vv=False,
+    rejected=None
+):
+    """Split jobs for the chain classification with direct arguments instead of sys.argv parsing.
+    
+    Args:
+        chain_file: Chain file for local alignments
+        bed_file: Bed file, gene annotations
+        bed_index: Indexed bed
+        log_file: Path to logfile
+        quiet: Don't print to console
+        parallel_logs_dir: Path to dir storing logs from each cluster job
+        jobs_num: Number of cluster jobs, 800 as default
+        job_size: How many jobs to put into one cluster job. If defined, --jobs_num is ignored
+        jobs: Directory to save lists with chains and intersected genes
+        jobs_file: File containing combined jobs
+        results_dir: Redirect stdout from cluster job to this dir
+        errors_dir: Redirect stderr from cluster job to this dir
+        make_index: Make index file
+        index_file: BDB file containing chains. If not assigned use [chain_file].bdb as default
+        ref: Reference species, hg38 as default
+        vv: Add -v flag to unit commands
+        rejected: Track rejected genes in the file given
+    """
+    # Create a mock args object with the provided arguments
+    class Args:
+        def __init__(self, **kwargs):
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+    
+    args = Args(
+        chain_file=chain_file,
+        bed_file=bed_file,
+        bed_index=bed_index,
+        log_file=log_file,
+        quiet=quiet,
+        parallel_logs_dir=parallel_logs_dir,
+        jobs_num=jobs_num,
+        job_size=job_size,
+        jobs=jobs,
+        jobs_file=jobs_file,
+        results_dir=results_dir,
+        errors_dir=errors_dir,
+        make_index=make_index,
+        index_file=index_file,
+        ref=ref,
+        vv=vv,
+        rejected=rejected
+    )
+    
+    setup_logger(args.log_file, write_to_console=not args.quiet)
+    check_args(args)  # check if all the files, dependencies etc are correct
+    intersections, skipped = get_intersections()  # intersect chains and beds
+    # # extract genes that are not intersected by any chain
+    # # or chrom is not aligned at all
+    # missing_genes_not_ali = [x[0] for x in skipped]
+    if args.rejected:
+        # skipped: genes that do not intersect any chain
+        save_rejected_genes(skipped, args.rejected)
+    commands = make_commands(intersections)  # shuffle and create set of commands
+    batch = split_commands(commands)  # split the commands into cluster jobs
+    template = get_template()
+    save(template, batch, logs_dir=args.parallel_logs_dir)  # save jobs and a jobs_file file
+    to_log("split_chain_jobs: estimated time: {0}".format(dt.now() - t0))
+    
+    return skipped  # Return the skipped genes for further processing
+
+
 def main():
     """Entry point."""
     args = parse_args()

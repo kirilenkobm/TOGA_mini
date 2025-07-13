@@ -367,6 +367,130 @@ def read_fragments_data(in_file):
     return ret
 
 
+def create_orthologous_loci_table(
+    orthologs_file, 
+    bed_file, 
+    bdb_bed_file, 
+    bdb_chain_file, 
+    tDB, 
+    qDB, 
+    toga_out_dir,
+    chains_limit=15,
+    skipped_genes=None,
+    o2o_only=False,
+    annotate_paralogs=False,
+    fragments_data=None,
+    log_file=None,
+    quiet=False
+):
+    """Create orthologous loci table with direct arguments instead of sys.argv parsing.
+    
+    Args:
+        orthologs_file: Output of the chain classifier
+        bed_file: BED FILE
+        bdb_bed_file: BDB BED FILE
+        bdb_chain_file: BDB CHAIN FILE
+        tDB: target 2 bit
+        qDB: query 2 bit
+        toga_out_dir: Toga output directory
+        chains_limit: Skip genes with amount of orthologs more than the limit
+        skipped_genes: If a gene was skipped due to number of chains limit, save it into a file
+        o2o_only: Process only the genes that have a single orthologous chain
+        annotate_paralogs: Annotate paralogs instead of orthologs
+        fragments_data: Gene: fragments file for fragmented genomes
+        log_file: Log file
+        quiet: Don't print to console
+    """
+    t0 = dt.now()
+    setup_logger(log_file, write_to_console=not quiet)
+    os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"  # otherwise it could crash
+    
+    to_log(f"{MODULE_NAME_FOR_LOG}: the arguments are:")
+    to_log(f"* orthologs_file: {orthologs_file}")
+    to_log(f"* bed_file: {bed_file}")
+    to_log(f"* bdb_bed_file: {bdb_bed_file}")
+    to_log(f"* bdb_chain_file: {bdb_chain_file}")
+    to_log(f"* tDB: {tDB}")
+    to_log(f"* qDB: {qDB}")
+    to_log(f"* toga_out_dir: {toga_out_dir}")
+    to_log(f"* chains_limit: {chains_limit}")
+    to_log(f"* skipped_genes: {skipped_genes}")
+    to_log(f"* o2o_only: {o2o_only}")
+    to_log(f"* annotate_paralogs: {annotate_paralogs}")
+    to_log(f"* fragments_data: {fragments_data}")
+
+    # get lists of orthologous chains per each gene
+    batch, chain_gene_field, skipped_1, m_ = read_orthologs(
+        orthologs_file, only_o2o=o2o_only, annotate_paralogs=annotate_paralogs
+    )
+    
+    # load reference bed file data; coordinates and exon sizes
+    bed_data = read_bed(bed_file)
+
+    # if this is a fragmented genome: we need to change procedure for split genes
+    if fragments_data:
+        gene_fragments_dict = read_fragments_data(fragments_data)
+    else:
+        gene_fragments_dict = dict()
+
+    # pre-compute chain : gene : region data - this is the main functionality now
+    regions, skipped_2 = precompute_regions(
+        batch,
+        bed_data,
+        bdb_chain_file,
+        chain_gene_field,
+        chains_limit,
+        qDB,
+    )
+
+    # Create orthologous loci table directly from precomputed regions
+    orthologous_loci = []
+    to_log(f"{MODULE_NAME_FOR_LOG}: creating orthologous loci table for {len(regions)} transcripts")
+
+    for transcript, chains_data in regions.items():
+        gene_fragments = gene_fragments_dict.get(transcript, False)
+        
+        # Handle fragmented genes - only use chains that are fragments
+        if gene_fragments:
+            chains_data = {
+                k: v for k, v in chains_data.items() if k in gene_fragments
+            }
+
+        # For each chain, add entry to orthologous loci table
+        for chain_id, chain_data in chains_data.items():
+            query_region = chain_data["search_locus"]
+            reference_strand = chain_data["reference_strand"]
+            query_strand = chain_data["query_strand"]
+            orthologous_loci.append((transcript, chain_id, query_region, reference_strand, query_strand))
+            to_log(f" * added locus: {transcript} -> chain {chain_id} -> {query_region} (ref:{reference_strand}, query:{query_strand})")
+
+    # Save orthologous loci table
+    output_file = os.path.join(toga_out_dir, "orthologous_loci.tsv")
+    to_log(f"{MODULE_NAME_FOR_LOG}: saving orthologous loci table to {output_file}")
+    
+    with open(output_file, "w") as f:
+        f.write("transcript_id\tchain_id\tquery_region\treference_strand\tquery_strand\n")
+        for transcript_id, chain_id, query_region, reference_strand, query_strand in orthologous_loci:
+            f.write(f"{transcript_id}\t{chain_id}\t{query_region}\t{reference_strand}\t{query_strand}\n")
+    
+    to_log(f"{MODULE_NAME_FOR_LOG}: saved {len(orthologous_loci)} orthologous loci")
+
+    # save skipped genes if required
+    if skipped_genes:
+        skipped = skipped_1 + skipped_2
+        to_log(f"{MODULE_NAME_FOR_LOG}: saving {len(skipped)} skipped transcripts to {skipped_genes}")
+        f = open(skipped_genes, "w")
+        # usually we have gene + reason why skipped
+        # we split them with tab
+        f.write("\n".join(["\t".join(x) for x in skipped]) + "\n")
+        f.close()
+
+    runtime = dt.now() - t0
+    to_log(f"{MODULE_NAME_FOR_LOG}: orthologous loci table creation done in {runtime}")
+    
+    return orthologous_loci
+
+
 def main():
     """Entry point."""
     t0 = dt.now()
