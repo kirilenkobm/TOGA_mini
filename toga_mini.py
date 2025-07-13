@@ -309,28 +309,7 @@ class Toga:
         self.BED_BDB_INDEX = os.path.join(
             self.LOCATION, Constants.MODULES_DIR, "bed_hdf5_index.py"
         )
-        # Remove unused module paths - these are now imported directly
-        # self.SPLIT_CHAIN_JOBS = os.path.join(self.LOCATION, Constants.MODULES_DIR, "split_chain_jobs.py")
-        self.MERGE_CHAINS_OUTPUT = os.path.join(
-            self.LOCATION, Constants.MODULES_DIR, "merge_chains_output.py"
-        )
-        self.CLASSIFY_CHAINS = os.path.join(
-            self.LOCATION, Constants.MODULES_DIR, "classify_chains.py"
-        )
-        # Remove unused module paths - these are now imported directly
-        # self.CREATE_ORTHOLOGOUS_LOCI_TABLE = os.path.join(
-        #     self.LOCATION, Constants.MODULES_DIR, "create_orthologous_loci_table.py"
-        # )
-        self.TRANSCRIPT_QUALITY = os.path.join(
-            self.LOCATION, Constants.MODULES_DIR, "get_transcripts_quality.py"
-        )
-        self.GENE_LOSS_SUMMARY = os.path.join(
-            self.LOCATION, Constants.MODULES_DIR, "gene_losses_summary.py"
-        )
-        self.ORTHOLOGY_TYPE_MAP = os.path.join(
-            self.LOCATION, Constants.MODULES_DIR, "orthology_type_map.py"
-        )
-        self.MODEL_TRAINER = os.path.join(self.LOCATION, "train_toga_chain_class_model.py")
+
         self.nextflow_rel_ = os.path.join(self.LOCATION, "toga_modules", "execute_joblist.nf")
         self.NF_EXECUTE = os.path.abspath(self.nextflow_rel_)
 
@@ -677,20 +656,6 @@ class Toga:
         finally:
             # Restore original sys.argv
             sys.argv = original_argv
-
-    @staticmethod  # todo: to utility class
-    def __parse_cesar_buckets(cesar_buckets_arg):
-        return [0] if cesar_buckets_arg == "0" else [int(x) for x in cesar_buckets_arg.split(",") if x != ""]
-
-    @staticmethod  # todo: to utility class
-    def __list_to_comma_separated_str(int_list):
-        return ",".join(map(str, int_list))
-
-    def __cleanup_parallelizer_files(self):
-        if not self.keep_nf_logs and self.nextflow_dir:
-            # remove nextflow intermediate files
-            shutil.rmtree(self.nextflow_dir) if os.path.isdir(self.nextflow_dir) else None
-        pass
 
 
 def parse_args(arg_strs: list[str] = None):

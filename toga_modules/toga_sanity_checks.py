@@ -208,8 +208,9 @@ class TogaSanityChecker:
         files_must_be = [
             toga_cls.CHAIN_BDB_INDEX,
             toga_cls.BED_BDB_INDEX,
-            toga_cls.MERGE_CHAINS_OUTPUT,
-            toga_cls.CLASSIFY_CHAINS,
+            # Removed references to deleted module paths:
+            # - MERGE_CHAINS_OUTPUT (imported directly)
+            # - CLASSIFY_CHAINS (imported directly)
         ]
         for _file in files_must_be:
             if os.path.isfile(_file):
