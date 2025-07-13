@@ -1,0 +1,10 @@
+.idea/
+
+nextflow_stuff
+hg38_vs_mm39_lncRNA_toga/
+
+util_c/bin/
+util_c/lib
+
+chain_class_models/*.dat
+toga_modules/__pycache__/

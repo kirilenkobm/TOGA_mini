@@ -1,0 +1,884 @@
+#!/usr/bin/env python3
+"""Master script for the TOGA pipeline.
+
+Perform all operations from the beginning to the end.
+If you need to call TOGA: most likely this is what you need.
+"""
+import argparse
+import json
+import os
+import shutil
+import sys
+import time
+from datetime import datetime as dt
+from typing import Optional
+
+from toga_modules.constants import Constants
+from toga_modules.bed_hdf5_index import bed_hdf5_index
+from toga_modules.chain_bst_index import chain_bst_index
+from toga_modules.classify_chains import classify_chains
+from toga_modules.common import call_process
+from toga_modules.common import get_fst_col
+from toga_modules.common import make_symlink
+from toga_modules.common import setup_logger
+from toga_modules.common import to_log
+from toga_modules.filter_bed import prepare_bed_file
+from toga_modules.make_pr_pseudogenes_annotation import create_ppgene_track
+from toga_modules.merge_chains_output import merge_chains_output
+from toga_modules.parallel_jobs_manager_helpers import get_nextflow_dir
+from toga_modules.stitch_fragments import stitch_scaffolds
+from toga_modules.toga_sanity_checks import TogaSanityChecker
+from toga_modules.toga_util import TogaUtil
+
+from toga_modules.parallel_jobs_manager import CustomStrategy
+from toga_modules.parallel_jobs_manager import NextflowStrategy
+from toga_modules.parallel_jobs_manager import ParaStrategy
+from toga_modules.parallel_jobs_manager import ParallelJobsManager
+
+__author__ = "Bogdan M. Kirilenko"
+__github__ = "https://github.com/kirilenkobm"
+__version__ = "Detached"
+
+LOCATION = os.path.dirname(__file__)
+
+
+class Toga:
+    """TOGA manager class."""
+    def __init__(self, args):
+        """Initiate toga class."""
+        self.t0 = dt.now()
+        # define project name
+        if args.project_dir:
+            _dirname = os.path.dirname(args.project_dir)
+            self.project_name = os.path.basename(_dirname)
+        else:
+            self.project_name = TogaUtil.generate_project_name()
+        # create project dir
+        self.wd: str = (  # had to add annotation to supress typing warnings in PyCharm 2023.3
+            os.path.abspath(args.project_dir)
+            if args.project_dir
+            else os.path.join(os.getcwd(), self.project_name)
+        )
+        os.mkdir(self.wd) if not os.path.isdir(self.wd) else None
+
+        # manage logfiles
+        _log_filename = self.t0.strftime("%Y_%m_%d_at_%H_%M")
+        self.quiet = args.quiet
+        self.log_file = os.path.join(self.wd, f"toga_{_log_filename}.log")
+        self.log_dir = os.path.join(self.wd, "temp_logs")  # temp file to collect logs from processes
+        os.mkdir(self.log_dir) if not os.path.isdir(self.log_dir) else None
+        setup_logger(self.log_file, write_to_console=not self.quiet)
+
+        # check if all files TOGA needs are here
+        self.temp_files = []  # remove at the end, list of temp files
+        to_log("#### Initiating TOGA class ####")
+        self.nextflow_config_dir = args.nextflow_config_dir
+        self.para_strategy = args.parallelization_strategy
+        self.cluster_queue_name = args.cluster_queue_name
+
+        self.toga_exe_path = os.path.dirname(__file__)
+        TogaUtil.log_python_version()
+        self.version = "DETACHED TOGA"
+        TogaSanityChecker.check_args_correctness(self, args)
+        self.__modules_addr()
+        TogaSanityChecker.check_dependencies(self)
+        TogaSanityChecker.check_completeness(self)
+        self.nextflow_dir = get_nextflow_dir(self.LOCATION, args.nextflow_dir)
+
+        self.temp_wd = os.path.join(self.wd, Constants.TEMP)
+        self.project_name = self.project_name.replace("/", "")
+        os.mkdir(self.temp_wd) if not os.path.isdir(self.temp_wd) else None
+        self.__check_nf_config()
+
+        # check whether nothing necessary is deleted afterward
+        TogaSanityChecker.check_dir_args_safety(self, LOCATION)
+
+        # to avoid crash on filesystem without locks:
+        os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
+
+        chain_basename = os.path.basename(args.chain_input)
+        # dir to collect log files with rejected reference genes:
+        self.rejected_dir = os.path.join(self.temp_wd, "rejected")
+        os.mkdir(self.rejected_dir) if not os.path.isdir(self.rejected_dir) else None
+
+        # filter chain in this folder
+        g_ali_basename = "genome_alignment"
+        self.chain_file = os.path.join(self.temp_wd, f"{g_ali_basename}.chain")
+        # there is an assumption that chain file has .chain extension
+        # chain indexing was a bit problematic: (i) bsddb3 fits perfectly but is very
+        # painful to install, (ii) sqlite is also fine but might be dysfunctional on some
+        # cluster file systems, so we create chain_ID: (start_byte, offset) dictionary for
+        # instant extraction of a particular chain from the chain file
+        # we save these dictionaries into two files: a text file (tsv) and binary file with BST
+        # depending on the case we will use both (for maximal performance)
+        self.chain_index_file = os.path.join(self.temp_wd, f"{g_ali_basename}.bst")
+        self.chain_index_txt_file = os.path.join(
+            self.temp_wd, f"{g_ali_basename}.chain_ID_position"
+        )
+
+        # make the command, prepare the chain file
+        if not os.path.isfile(args.chain_input):
+            self.die(f"Error! File {args.chain_input} doesn't exist!")
+
+        if chain_basename.endswith(".gz"):  # version for gz
+            chain_filter_cmd = (
+                f"gzip -dc {args.chain_input} | "
+                f"{self.CHAIN_SCORE_FILTER} stdin "
+                f"{args.min_score} > {self.chain_file}"
+                # Tried to replace C binary with AWK, something to think about
+                # f"awk -f {self.CHAIN_SCORE_FILTER_AWK} {args.min_score} "
+                # f"> {self.chain_file}"
+            )
+        elif args.no_chain_filter:  # it is .chain and score filter is not required
+            chain_filter_cmd = f"rsync -a {args.chain_input} {self.chain_file}"
+        else:  # it is .chain | score filter required
+            chain_filter_cmd = (
+                f"{self.CHAIN_SCORE_FILTER} {args.chain_input} "
+                f"{args.min_score} > {self.chain_file}"
+            )
+
+        # filter chains with score < threshold
+        call_process(
+            chain_filter_cmd, "Please check if you use a proper chain file."
+        )
+
+        # bed define bed files addresses
+        self.ref_bed = os.path.join(self.temp_wd, "toga_filt_ref_annot.bed")
+        self.index_bed_file = os.path.join(self.temp_wd, "toga_filt_ref_annot.hdf5")
+
+        # filter bed file
+        bed_filter_rejected_file = "BED_FILTER_REJECTED.txt"
+        bed_filter_rejected = os.path.join(self.rejected_dir, bed_filter_rejected_file)
+        # keeping UTRs!
+        prepare_bed_file(
+            args.bed_input,
+            self.ref_bed,
+            ouf=False,  # TODO: check whether we like to include this parameter
+            save_rejected=bed_filter_rejected,
+            only_chrom=args.limit_to_ref_chrom,
+        )
+
+        # mics things
+        self.isoforms_arg = args.isoforms if args.isoforms else None
+        self.isoforms = None  # will be assigned after completeness check
+        self.chain_jobs = args.chain_jobs_num
+        self.time_log = args.time_marks
+        self.rejected_log = os.path.join(self.wd, "genes_rejection_reason.tsv")
+        self.keep_temp = True if args.keep_temp else False
+
+        # define to call CESAR or not to call
+        self.t_2bit = self.__find_two_bit(args.tDB)
+        self.q_2bit = self.__find_two_bit(args.qDB)
+
+        self.hq_orth_threshold = 0.95
+        self.orth_chain_limit = args.orth_chain_limit
+        self.o2o_only = args.o2o_only
+        self.keep_nf_logs = args.do_not_del_nf_logs
+        self.ld_model_arg = args.ld_model
+
+        self.fragmented_genome = False if args.disable_fragments_joining else True
+        self.orth_score_threshold = args.orth_score_threshold
+        if self.orth_score_threshold < 0.0 or args.orth_score_threshold > 1.0:
+            self.die(
+                "orth_score_threshold parameter must be in range [0..1], got "
+                f"{self.orth_score_threshold}; Abort"
+            )
+
+        self.chain_results_df = os.path.join(self.wd, "chain_features.tsv")
+
+        self.bed_fragm_exons_data = os.path.join(
+            self.temp_wd, "bed_fragments_to_exons.tsv"
+        )
+
+        # genes to be classified as missing
+        self._transcripts_not_intersected = []
+        self._transcripts_not_classified = []
+        self.predefined_glp_cesar_split = os.path.join(
+            self.temp_wd, "predefined_glp_cesar_split.tsv"
+        )
+
+        self.__check_param_files()
+
+        # create symlinks to 2bits: let user know what 2bits were used
+        self.t_2bit_link = os.path.join(self.wd, "t2bit.link")
+        self.q_2bit_link = os.path.join(self.wd, "q2bit.link")
+        make_symlink(self.t_2bit, self.t_2bit_link)
+        make_symlink(self.q_2bit, self.q_2bit_link)
+
+        # dump input parameters, object state
+        self.toga_params_file = os.path.join(self.temp_wd, "toga_init_state.json")
+        self.toga_args_file = os.path.join(self.wd, "project_args.json")
+        self.version_file = os.path.join(self.wd, "version.txt")
+
+        with open(self.toga_params_file, "w") as f:
+            # default=string is a workaround to serialize datetime object
+            json.dump(self.__dict__, f, default=str)
+        with open(self.toga_args_file, "w") as f:
+            json.dump(vars(args), f, default=str)
+        with open(self.version_file, "w") as f:
+            f.write(self.version)
+
+        to_log(f"Saving output to {self.wd}")
+        to_log(f"Arguments stored in {self.toga_args_file}")
+
+    def __get_paralellizer(self, selected_strategy):
+        """Initiate parallelization strategy selected by user."""
+        to_log(f"Selected parallelization strategy: {selected_strategy}")
+        if selected_strategy not in Constants.PARA_STRATEGIES:
+            msg = (f"ERROR! Strategy {selected_strategy} is not found, "
+                   f"allowed strategies are: {Constants.PARA_STRATEGIES}")
+            self.die(msg, rc=1)
+        if selected_strategy == "nextflow":
+            selected_strategy = NextflowStrategy()
+        elif selected_strategy == "para":
+            selected_strategy = ParaStrategy()
+        else:
+            selected_strategy = CustomStrategy()
+        jobs_manager = ParallelJobsManager(selected_strategy)
+        return jobs_manager
+
+    def __check_param_files(self):
+        """Check that all parameter files exist."""
+        files_to_check = [
+            self.t_2bit,
+            self.q_2bit,
+            self.ref_bed,
+            self.chain_file,
+            self.isoforms_arg,
+        ]
+        for item in files_to_check:
+            if not item:
+                # this file just not given
+                continue
+            elif not os.path.isfile(item):
+                self.die(f"Error! File {item} not found!")
+
+        # sanity checks: check that bed file chroms match reference 2bit
+        with open(self.ref_bed, "r") as f:
+            lines = [line.rstrip().split("\t") for line in f]
+            t_in_bed = set(x[3] for x in lines)
+            chroms_in_bed = set(x[0] for x in lines)
+            # 2bit check function accepts a dict chrom: size
+            # from bed12 file we cannot infer sequence length
+            # None is just a placeholder that indicated that we don't need
+            # to compare chrom lengths with 2bit
+            chrom_sizes_in_bed = {x: None for x in chroms_in_bed}
+        self.isoforms = TogaSanityChecker.check_isoforms_file(self.isoforms_arg, t_in_bed, self.temp_wd)
+        TogaSanityChecker.check_2bit_file_completeness(self.t_2bit, chrom_sizes_in_bed, self.ref_bed)
+        # need to check that chain chroms and their sizes match 2bit file data
+        with open(self.chain_file, "r") as f:
+            header_lines = [x.rstrip().split() for x in f if x.startswith("chain")]
+            t_chrom_to_size = {x[2]: int(x[3]) for x in header_lines}
+            q_chrom_to_size = {x[7]: int(x[8]) for x in header_lines}
+        f.close()
+        TogaSanityChecker.check_2bit_file_completeness(self.t_2bit, t_chrom_to_size, self.chain_file)
+        TogaSanityChecker.check_2bit_file_completeness(self.q_2bit, q_chrom_to_size, self.chain_file)
+
+    def die(self, msg, rc=1):
+        """Show msg in stderr, exit with the rc given."""
+        to_log(msg)
+        to_log(f"Program finished with exit code {rc}\n")
+        # for t_file in self.temp_files:  # remove temp files if required
+        #     os.remove(t_file) if os.path.isfile(t_file) and not self.keep_temp else None
+        #     shutil.rmtree(t_file) if os.path.isdir(t_file) and not self.keep_temp else None
+        self.__mark_crashed()
+        sys.exit(rc)
+
+    def __modules_addr(self):
+        """Define addresses of modules."""
+        self.LOCATION = os.path.dirname(__file__)  # folder containing pipeline scripts
+        self.CHAIN_SCORE_FILTER = os.path.join(
+            self.LOCATION, Constants.C_BIN_DIR, "chain_score_filter"
+        )
+        self.CHAIN_COORDS_CONVERT_LIB = os.path.join(
+            self.LOCATION, Constants.C_LIB_DIR, "chain_coords_converter_slib.dylib"
+        )
+        self.EXTRACT_SUBCHAIN_LIB = os.path.join(
+            self.LOCATION, Constants.C_LIB_DIR, "extract_subchain_slib.dylib"
+        )
+        self.CHAIN_FILTER_BY_ID = os.path.join(
+            self.LOCATION, Constants.C_BIN_DIR, "chain_filter_by_id"
+        )
+        self.CHAIN_BDB_INDEX = os.path.join(
+            self.LOCATION, Constants.MODULES_DIR, "chain_bst_index.py"
+        )
+        self.CHAIN_INDEX_SLIB = os.path.join(
+            self.LOCATION, Constants.C_LIB_DIR, "chain_bst_lib.dylib"
+        )
+        self.BED_BDB_INDEX = os.path.join(
+            self.LOCATION, Constants.MODULES_DIR, "bed_hdf5_index.py"
+        )
+        self.SPLIT_CHAIN_JOBS = os.path.join(self.LOCATION, Constants.MODULES_DIR, "split_chain_jobs.py")
+        self.MERGE_CHAINS_OUTPUT = os.path.join(
+            self.LOCATION, Constants.MODULES_DIR, "merge_chains_output.py"
+        )
+        self.CLASSIFY_CHAINS = os.path.join(
+            self.LOCATION, Constants.MODULES_DIR, "classify_chains.py"
+        )
+        self.SPLIT_EXON_REALIGN_JOBS = os.path.join(
+            self.LOCATION, Constants.MODULES_DIR, "split_exon_realign_jobs.py"
+        )
+        self.TRANSCRIPT_QUALITY = os.path.join(
+            self.LOCATION, Constants.MODULES_DIR, "get_transcripts_quality.py"
+        )
+        self.GENE_LOSS_SUMMARY = os.path.join(
+            self.LOCATION, Constants.MODULES_DIR, "gene_losses_summary.py"
+        )
+        self.ORTHOLOGY_TYPE_MAP = os.path.join(
+            self.LOCATION, Constants.MODULES_DIR, "orthology_type_map.py"
+        )
+        self.MODEL_TRAINER = os.path.join(self.LOCATION, "train_toga_chain_class_model.py")
+        self.nextflow_rel_ = os.path.join(self.LOCATION, "toga_modules", "execute_joblist.nf")
+        self.NF_EXECUTE = os.path.abspath(self.nextflow_rel_)
+
+    def __check_nf_config(self):
+        """Check that nextflow configure files are here."""
+        if self.nextflow_config_dir is None:
+            # no nextflow config provided -> using local executor
+            self.local_executor = True
+            return
+        # check that required config files are here
+        if not os.path.isdir(self.nextflow_config_dir):
+            self.die(
+                f"Error! Nextflow config dir {self.nextflow_config_dir} does not exist!"
+            )
+        err_msg = (
+            "Please note these two files are expected in the nextflow config directory:\n"
+            "1) call_cesar_config_template.nf"
+            "2) extract_chain_features_config.nf"
+        )
+        # check CESAR config template first
+        nf_cesar_config_temp = os.path.join(
+            self.nextflow_config_dir, "call_cesar_config_template.nf"
+        )
+        if not os.path.isfile(nf_cesar_config_temp):
+            self.die(f"Error! File {nf_cesar_config_temp} not found!\n{err_msg}")
+        # check chain extract features config; we need abspath to this file
+        nf_chain_extr_config_file = os.path.abspath(
+            os.path.join(self.nextflow_config_dir, "extract_chain_features_config.nf")
+        )
+        if not os.path.isfile(nf_chain_extr_config_file):
+            self.die(
+                f"Error! File {nf_chain_extr_config_file} not found!\n{err_msg}"
+            )
+        self.local_executor = False
+
+    def __find_two_bit(self, db):
+        """Find a 2bit file."""
+        if os.path.isfile(db):
+            return os.path.abspath(db)
+        # For now here is a hillerlab-oriented solution
+        # you can write your own template for 2bit files location
+        with_alias = f"/projects/hillerlab/genome/gbdb-HL/{db}/{db}.2bit"
+        if os.path.isfile(with_alias):
+            return with_alias
+        elif os.path.islink(with_alias):
+            return os.path.abspath(os.readlink(with_alias))
+        self.die(f"Two bit file {db} not found! Abort")
+
+    def run(self, up_to_and_incl: Optional[int] = None) -> None:
+        """Run TOGA from start to finish"""
+        # 0) preparation:
+        # define the project name and mkdir for it
+        # move chain file filtered
+        # define initial values
+        # make indexed files for the chain
+        self.__mark_start()
+        to_log("\n\n#### STEP 0: making chain and bed file indexes\n")
+        self.__make_indexed_chain()
+        self.__make_indexed_bed()
+        self.__time_mark("Made indexes")
+        if up_to_and_incl is not None and up_to_and_incl == 0: return None
+
+        # 1) make joblist for chain features extraction
+        to_log("\n\n#### STEP 1: Generate extract chain features jobs\n")
+        self.__split_chain_jobs()
+        self.__time_mark("Split chain jobs")
+        if up_to_and_incl is not None and up_to_and_incl == 1: return None
+
+        # 2) extract chain features: parallel process
+        to_log("\n\n#### STEP 2: Extract chain features: parallel step\n")
+        self.__extract_chain_features()
+        self.__time_mark("Chain jobs done")
+        to_log(f"Logs from individual chain runner jobs are show below")
+        self.__collapse_logs("chain_runner_")
+        if up_to_and_incl is not None and up_to_and_incl == 2: return None
+
+        # 3) create chain features dataset
+        to_log("\n\n#### STEP 3: Merge step 2 output\n")
+        self.__merge_chains_output()
+        self.__time_mark("Chains output merged")
+        if up_to_and_incl is not None and up_to_and_incl == 3: return None
+
+        # 4) classify chains as orthologous, paralogous, etc. using xgboost
+        to_log("\n\n#### STEP 4: Classify chains using gradient boosting model\n")
+        self.__classify_chains()
+        self.__time_mark("Chains classified")
+        if up_to_and_incl is not None and up_to_and_incl == 4: return None
+
+        # 5) create cluster jobs for CESAR2.0
+        to_log("\n\n#### STEP 5: Generate CESAR jobs")
+        # experimental feature, not publically available:
+        self.__split_cesar_jobs()
+        self.__time_mark("Split cesar jobs done")
+        if up_to_and_incl is not None and up_to_and_incl == 5: return None
+
+        # 6) Create bed track for processed pseudogenes
+        to_log("\n\n#### STEP 6: Create processed pseudogenes track\n")
+        self.__create_processed_pseudogenes_track()
+        return None
+
+    def __collapse_logs(self, prefix):
+        """Merge logfiles starting with prefix into a single log."""
+        log_filenames_with_prefix = [x for x in os.listdir(self.log_dir) if x.startswith(prefix)]
+        log_f = open(self.log_file, "a")
+        for log_filename in log_filenames_with_prefix:
+            full_path = os.path.join(self.log_dir, log_filename)
+            clipped_filename = log_filename.split(".")[0]  # remove .log
+            in_f = open(full_path, "r")
+            for line in in_f:
+                log_f.write(f"{clipped_filename}: {line}")
+            in_f.close()
+        log_f.close()
+
+    def __mark_start(self):
+        """Indicate that TOGA process have started."""
+        p_ = os.path.join(self.wd, Constants.RUNNING)
+        f = open(p_, "w")
+        now_ = str(dt.now())
+        f.write(f"TOGA process started at {now_}\n")
+        f.close()
+
+    def __mark_crashed(self):
+        """Indicate that TOGA process died."""
+        running_f = os.path.join(self.wd, Constants.RUNNING)
+        crashed_f = os.path.join(self.wd, Constants.CRASHED)
+        os.remove(running_f) if os.path.isfile(running_f) else None
+        f = open(crashed_f, "w")
+        now_ = str(dt.now())
+        f.write(f"TOGA CRASHED AT {now_}\n")
+        f.close()
+
+    def __make_indexed_chain(self):
+        """Make chain index file."""
+        # make *.bb file
+        to_log("Started chain indexing...")
+        self.temp_files.append(self.chain_index_file)
+        self.temp_files.append(self.chain_file)
+        self.temp_files.append(self.chain_index_txt_file)
+
+        if os.path.isfile(self.chain_file) and os.path.isfile(self.chain_index_txt_file):
+            return
+
+        chain_bst_index(
+            self.chain_file, self.chain_index_file, txt_index=self.chain_index_txt_file
+        )
+
+    def __time_mark(self, msg):
+        """Left time mark."""
+        if self.time_log is None:
+            return
+        t = dt.now() - self.t0
+        with open(self.time_log, "a") as f:
+            f.write(f"{msg} at {t}\n")
+
+    def __make_indexed_bed(self):
+        """Create gene_ID: bed line bdb indexed file."""
+        to_log("Started bed file indexing...")
+        bed_hdf5_index(self.ref_bed, self.index_bed_file)
+        self.temp_files.append(self.index_bed_file)
+
+    def __split_chain_jobs(self):
+        """Wrap split_jobs.py script."""
+        # define arguments
+        # save split jobs
+        self.ch_cl_jobs = os.path.join(self.temp_wd, "chain_classification_jobs")
+        # for raw results of this stage
+        self.chain_class_results = os.path.join(
+            self.temp_wd, "chain_classification_results"
+        )
+        self.chain_cl_jobs_combined = os.path.join(
+            self.temp_wd, "chain_class_jobs_combined"
+        )
+        rejected_filename = "SPLIT_CHAIN_REJ.txt"
+        rejected_path = os.path.join(self.rejected_dir, rejected_filename)
+        self.temp_files.append(self.ch_cl_jobs)
+        self.temp_files.append(self.chain_class_results)
+        self.temp_files.append(self.chain_cl_jobs_combined)
+
+        split_jobs_cmd = (
+            f"{self.SPLIT_CHAIN_JOBS} "
+            f"{self.chain_file} "
+            f"{self.ref_bed} "
+            f"{self.index_bed_file} "
+            f"--log_file {self.log_file} "
+            f"--parallel_logs_dir {self.log_dir} "
+            f"--jobs_num {self.chain_jobs} "
+            f"--jobs {self.ch_cl_jobs} "
+            f"--jobs_file {self.chain_cl_jobs_combined} "
+            f"--results_dir {self.chain_class_results} "
+            f"--rejected {rejected_path} "
+            f"{'--quiet' if self.quiet else ''}"
+        )
+
+        call_process(split_jobs_cmd, "Could not split chain jobs!")
+        # collect transcripts not intersected at all here
+        self._transcripts_not_intersected = get_fst_col(rejected_path)
+
+    def __extract_chain_features(self):
+        """Execute extract chain features jobs."""
+        timestamp = str(time.time()).split(".")[0]
+        project_name = f"chain_feats__{self.project_name}_at_{timestamp}"
+        project_path = os.path.join(self.nextflow_dir, project_name)
+
+        to_log(f"Extracting chain features, project name: {project_name}")
+        to_log(f"Project path: {project_path}")
+
+        # Prepare common data for the strategy to use
+        manager_data = {
+            "project_name": project_name,
+            "project_path": project_path,
+            "logs_dir": project_path,
+            "nextflow_dir": self.nextflow_dir,
+            "NF_EXECUTE": self.NF_EXECUTE,
+            "local_executor": self.local_executor,
+            "keep_nf_logs": self.keep_nf_logs,
+            "nextflow_config_dir": self.nextflow_config_dir,
+            "temp_wd": self.temp_wd,
+            "queue_name": self.cluster_queue_name
+        }
+
+        # Execute jobs via the Strategy pattern
+        jobs_manager = self.__get_paralellizer(self.para_strategy)
+        try:
+            jobs_manager.execute_jobs(self.chain_cl_jobs_combined, manager_data, project_name, wait=True)
+        except KeyboardInterrupt:
+            TogaUtil.terminate_parallel_processes([jobs_manager, ])
+
+    def __merge_chains_output(self):
+        """Call parse results."""
+        # define where to save intermediate table
+        merge_chains_output(
+            self.ref_bed, self.isoforms, self.chain_class_results, self.chain_results_df
+        )
+        # .append(self.chain_results_df)  -> UCSC plugin needs that
+
+    def __classify_chains(self):
+        """Run decision tree."""
+        # define input and output."""
+        to_log("Classifying chains")
+        self.transcript_to_chain_classes = os.path.join(self.temp_wd, "trans_to_chain_classes.tsv")
+        self.pred_scores = os.path.join(self.wd, "orthology_scores.tsv")
+        self.se_model = os.path.join(self.LOCATION, "chain_class_models", "se_model.dat")
+        self.me_model = os.path.join(self.LOCATION, "chain_class_models", "me_model.dat")
+        self.ld_model = os.path.join(
+            self.LOCATION, "long_distance_model", "long_dist_model.dat"
+        )
+        cl_rej_log = os.path.join(self.rejected_dir, "classify_chains_rejected.txt")
+        ld_arg_ = self.ld_model if self.ld_model_arg else None
+
+        if not os.path.isfile(self.se_model) or not os.path.isfile(self.me_model):
+            self.die(f"Cannot find {self.se_model} or {self.me_model} models!")
+
+        classify_chains(
+            self.chain_results_df,
+            self.transcript_to_chain_classes,
+            self.se_model,
+            self.me_model,
+            rejected=cl_rej_log,
+            raw_out=self.pred_scores,
+            annot_threshold=self.orth_score_threshold,
+            ld_model=ld_arg_,
+        )
+        # extract not classified transcripts
+        # first column in the rejected log
+        self._transcripts_not_classified = get_fst_col(cl_rej_log)
+        TogaSanityChecker.check_chains_classified(self.chain_results_df)
+
+    def __create_processed_pseudogenes_track(self):
+        """Create annotation of processed genes in query."""
+        to_log("Creating processed pseudogenes track.")
+        processed_pseudogenes_track = os.path.join(self.wd, "proc_pseudogenes.bed")
+        create_ppgene_track(
+            self.pred_scores, self.chain_file, self.index_bed_file, processed_pseudogenes_track
+        )
+
+    def __split_cesar_jobs(self):
+        """Call split_exon_realign_jobs.py."""
+        if self.fragmented_genome:
+            to_log("Detecting fragmented transcripts")
+            # need to stitch fragments together
+            gene_fragments = stitch_scaffolds(
+                self.chain_file, self.pred_scores, self.ref_bed, True
+            )
+            fragm_dict_file = os.path.join(self.temp_wd, "gene_fragments.txt")
+            f = open(fragm_dict_file, "w")
+            for k, v in gene_fragments.items():
+                v_str = ",".join(map(str, v))
+                f.write(f"{k}\t{v_str}\n")
+            f.close()
+            to_log(f"Fragments data saved to {fragm_dict_file}")
+        else:
+            # no fragment file: ok
+            to_log("Skip fragmented genes detection")
+            fragm_dict_file = None
+
+        # if we call CESAR
+        to_log("Setting up creating CESAR jobs")
+        self.cesar_jobs_dir = os.path.join(self.temp_wd, "cesar_jobs")
+        self.cesar_combined = os.path.join(self.temp_wd, "cesar_combined")
+        self.cesar_results = os.path.join(self.temp_wd, "cesar_results")
+
+        self.temp_files.append(self.cesar_jobs_dir)
+        self.temp_files.append(self.cesar_combined)
+        self.temp_files.append(self.predefined_glp_cesar_split)
+
+        # different field names depending on --ml flag
+        self.temp_files.append(self.cesar_results)
+        skipped_path = os.path.join(self.rejected_dir, "SPLIT_CESAR.txt")
+        self.paralogs_log = os.path.join(self.temp_wd, "paralogs.txt")
+
+        split_cesar_cmd = (
+            f"{self.SPLIT_EXON_REALIGN_JOBS} "
+            f"{self.transcript_to_chain_classes} {self.ref_bed} "
+            f"{self.index_bed_file} {self.chain_index_file} "
+            f"{self.t_2bit} "
+            f"{self.q_2bit} "
+            f"{self.wd} "
+            f"--jobs_dir {self.cesar_jobs_dir} "
+            f"--jobs_num {self.cesar_jobs_num} "
+            f"--combined {self.cesar_combined} "
+            f"--results {self.cesar_results} "
+            f"--buckets {self.__list_to_comma_separated_str(self.cesar_buckets)} "
+            f"--mem_limit {self.cesar_mem_limit} "
+            f"--chains_limit {self.orth_chain_limit} "
+            f"--skipped_genes {skipped_path} "
+            f"--rejected_log {self.rejected_dir} "
+            f"--cesar_binary NONE "
+            f"--paralogs_log {self.paralogs_log} "
+            f"--predefined_glp_class_path {self.predefined_glp_cesar_split} "
+            f"--unprocessed_log {self.technical_cesar_err} "
+            f"--log_file {self.log_file} "
+            f"--cesar_logs_dir {self.log_dir} "
+            f"{'--quiet' if self.quiet else ''}"
+        )
+
+        if self.annotate_paralogs:  # very rare occasion
+            split_cesar_cmd += f" --annotate_paralogs"
+        if self.mask_all_first_10p:
+            split_cesar_cmd += f" --mask_all_first_10p"
+        split_cesar_cmd = (
+            split_cesar_cmd + " --mask_stops" if self.mask_stops else split_cesar_cmd
+        )
+        split_cesar_cmd = (
+            split_cesar_cmd + f" --u12 {self.u12}" if self.u12 else split_cesar_cmd
+        )
+        split_cesar_cmd = (
+            split_cesar_cmd + " --o2o_only" if self.o2o_only else split_cesar_cmd
+        )
+        split_cesar_cmd = (
+            split_cesar_cmd + " --no_fpi" if self.no_fpi else split_cesar_cmd
+        )
+        if self.gene_loss_data:
+            split_cesar_cmd += f" --check_loss {self.gene_loss_data}"
+        if fragm_dict_file:
+            split_cesar_cmd += f" --fragments_data {fragm_dict_file}"
+        call_process(split_cesar_cmd, "Could not split CESAR jobs!")
+
+    @staticmethod  # todo: to utility class
+    def __parse_cesar_buckets(cesar_buckets_arg):
+        return [0] if cesar_buckets_arg == "0" else [int(x) for x in cesar_buckets_arg.split(",") if x != ""]
+
+    @staticmethod  # todo: to utility class
+    def __list_to_comma_separated_str(int_list):
+        return ",".join(map(str, int_list))
+
+    def __cleanup_parallelizer_files(self):
+        if not self.keep_nf_logs and self.nextflow_dir:
+            # remove nextflow intermediate files
+            shutil.rmtree(self.nextflow_dir) if os.path.isdir(self.nextflow_dir) else None
+        pass
+
+
+def parse_args(arg_strs: list[str] = None):
+    """Parse arguments from the command line, or from a list of strings."""
+    app = argparse.ArgumentParser()
+    app.add_argument(
+        "chain_input",
+        type=str,
+        help="Chain file. Extensions like FILE.chain or FILE.chain.gz are applicable."
+    )
+    app.add_argument(
+        "bed_input", type=str, help="Bed file with annotations for the target genome."
+    )
+    app.add_argument(
+        "tDB", default=None, help="Reference genome sequence in 2bit format."
+    )
+    app.add_argument("qDB", default=None, help="Query genome sequence in 2bit format.")
+
+    # global ops
+    app.add_argument(
+        "--project_dir",
+        "--pd",
+        default=None,
+        help=(
+            "Project directory. TOGA will save all intermediate and output files "
+            "exactly in this directory. If not specified, use CURRENT_DIR/PROJECT_NAME "
+            "as default (see below)."
+        )
+    )
+    app.add_argument(
+        "--min_score",
+        "--msc",
+        type=int,
+        default=15000,
+        help=(
+            "Chain score threshold. Exclude chains that have a lower score "
+            "from the analysis. Default value is 15000."
+        )
+    )
+    app.add_argument(
+        "--isoforms", "-i", type=str, default="", help="Path to isoforms data file"
+    )
+    app.add_argument(
+        "--keep_temp",
+        "--kt",
+        action="store_true",
+        dest="keep_temp",
+        help="Do not remove temp files.",
+    )
+    app.add_argument(
+        "--quiet",
+        "-q",
+        action="store_true",
+        help="Don't print to console"
+    )
+    app.add_argument(
+        "--limit_to_ref_chrom",
+        default=None,
+        help="Find orthologs " "for a single reference chromosome only",
+    )
+    app.add_argument(
+        "--nextflow_dir",
+        "--nd",
+        default=None,
+        help=(
+            "Nextflow working directory: from this directory nextflow is "
+            "executed, also there all nextflow log files are kept"
+        )
+    )
+    app.add_argument(
+        "--nextflow_config_dir",
+        "--nc",
+        default=None,
+        help=(
+            "Directory containing nextflow configuration files "
+            "for cluster, pls see nextflow_config_files/readme.txt "
+            "for details."
+        )
+    )
+    app.add_argument(
+        "--do_not_del_nf_logs", "--nfnd", action="store_true", dest="do_not_del_nf_logs"
+    )
+    app.add_argument(
+        "--parallelization_strategy",
+        "--ps",
+        choices=Constants.PARA_STRATEGIES,  # TODO: add snakemake
+        default="nextflow",
+        help=(
+            "The parallelization strategy to use. If custom -> please provide "
+            "a custom strategy implementation in the parallel_jobs_manager.py "
+        )
+    )
+    # chain features related
+    app.add_argument(
+        "--chain_jobs_num",
+        "--chn",
+        type=int,
+        default=100,
+        help=(
+            "Number of cluster jobs for extracting chain features. "
+            "Recommended from 150 to 200 jobs."
+        )
+    )
+    app.add_argument(
+        "--no_chain_filter",
+        "--ncf",
+        action="store_true",
+        dest="no_chain_filter",
+        help=(
+            "A flag. Do not filter the chain file (make sure you specified a "
+            ".chain but not .gz file in this case)"
+        ),
+    )
+    app.add_argument(
+        "--orth_score_threshold",
+        "--ost",
+        default=0.5,
+        type=float,
+        help="Score threshold to distinguish orthologs from paralogs, default 0.5",
+    )
+    app.add_argument(
+        "--orth_chain_limit",
+        type=int,
+        default=100,
+        help=(
+            "Skip genes that have more that ORTH_CHAIN_LIMIT orthologous "
+            "chains. Recommended values are a 50-100."
+        )
+    )
+    app.add_argument(
+        "--time_marks",
+        "-t",
+        default=None,
+        help="File to save timings of different steps.",
+    )
+    app.add_argument(
+        "--o2o_only",
+        "--o2o",
+        action="store_true",
+        dest="o2o_only",
+        help="Process only the genes that have a single orthologous chain",
+    )
+    app.add_argument(
+        "--disable_fragments_joining",
+        "--dfj",
+        dest="disable_fragments_joining",
+        action="store_true",
+        help="Disable assembling query genes from pieces",
+    )
+    app.add_argument(
+        "--ld_model",
+        dest="ld_model",
+        action="store_true",
+        help="Apply extra classifier for molecular distances ~1sps.",
+    )
+    app.add_argument(
+        "--cluster_queue_name",
+        "--cqn",
+        default="batch",
+        help=(
+            "Specify cluster partition/queue, default batch. "
+            "Another popular option is 'long'. Please consult "
+            "with your system administrator to figure out which "
+            "parameter is the most suitable for your HPC system."
+        )
+    )
+    # print help if there are no args
+    if not arg_strs and len(sys.argv) < 2:
+        app.print_help()
+        sys.exit(0)
+
+    args = app.parse_args(arg_strs)
+    return args
+
+
+def main():
+    """Entry point."""
+    args = parse_args()
+    toga_manager = Toga(args)
+    toga_manager.run()
+
+
+if __name__ == "__main__":
+    main()
