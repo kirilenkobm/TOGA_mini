@@ -12,7 +12,12 @@ dependencies:
   - scikit-learn
   - joblib
   - h5py
-  - pip
   - nextflow
+  - bsddb3
+  - cmake
+  - make
+  - gcc
+  - pkg-config
+  - pip
   - pip:
       - twobitreader

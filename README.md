@@ -15,16 +15,9 @@ Unlike full TOGA, TOGA-mini focuses solely on predicting orthologous loci for an
 
 ## 📦 Installation
 
-Train classification models:
-
-```
-./chain_class_models/train_toga_chain_class_model.py
-```
-
-Build C modules:
-
 ```bash
-./build_c.sh 
+conda env create -f environment.yaml
+./configure.sh
 ```
 
 A unified `configure.sh` installation script is planned.
