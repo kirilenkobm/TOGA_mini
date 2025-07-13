@@ -69,7 +69,6 @@ def bed_extract_id(index_file, gene_ids):
     for key in keys:
         try:  # catch key error
             b_bed_line = h[key][()]
-            u_type = f"U{len(b_bed_line)}"
             bed_line = b_bed_line.decode("utf-8")
             bed_lines.append(bed_line)
         except KeyError:

@@ -13,7 +13,6 @@ import xgboost as xgb
 
 from toga_modules.common import setup_logger
 from toga_modules.common import to_log
-from toga_modules.common import die
 
 __author__ = "Bogdan M. Kirilenko"
 

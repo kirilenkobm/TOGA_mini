@@ -54,11 +54,8 @@ class NextflowStrategy(ParallelizationStrategy):
     """
     Concrete strategy for parallelization using Nextflow.
     """
-    CESAR_CONFIG_TEMPLATE_FILENAME = "call_cesar_config_template.nf"
     CHAIN_CONFIG_TEMPLATE_FILENAME = "extract_chain_features_config.nf"
     CHAIN_JOBS_PREFIX = "chain_feats__"
-    CESAR_JOBS_PREFIX = "cesar_jobs__"
-    CESAR_CONFIG_MEM_TEMPLATE = "${_MEMORY_}"
     DEFAULT_QUEUE_NAME = "batch"
 
     def __init__(self):
@@ -125,19 +122,6 @@ class NextflowStrategy(ParallelizationStrategy):
             config_path = os.path.join(self.nextflow_config_dir, config_filename)
             with open(original_config_path) as in_, open(config_path, "w") as out_:
                 out_.write(in_.read())
-        elif self.label.startswith(self.CESAR_JOBS_PREFIX):
-            # need to craft CESAR joblist first
-            config_template_path = os.path.abspath(os.path.join(self.nextflow_config_dir,
-                                                                self.CESAR_CONFIG_TEMPLATE_FILENAME))
-            with open(config_template_path, "r") as f:
-                cesar_config_template = f.read()
-            config_string = cesar_config_template.replace(self.CESAR_CONFIG_MEM_TEMPLATE,
-                                                          f"{self.memory_limit}")
-            config_filename = f"cesar_config_{self.memory_limit}_queue.nf"
-            toga_temp_dir = self.manager_data["temp_wd"]
-            config_path = os.path.abspath(os.path.join(toga_temp_dir, config_filename))
-            with open(config_path, "w") as f:
-                f.write(config_string)
         if self.queue_name:
             # in this case, the queue name should be specified
             with open(config_path, "a") as f:
@@ -152,15 +136,6 @@ class NextflowStrategy(ParallelizationStrategy):
         if running:
             return None
         self.return_code = self._process.returncode
-        # the process just finished
-        # nextflow provides a huge and complex tree of log files
-        # remove them if user did not explicitly ask to keep them
-        # if not self.keep_logs and self.nf_project_path:
-        #     # remove nextflow intermediate files
-        #     shutil.rmtree(self.nf_project_path) if os.path.isdir(self.nf_project_path) else None
-        if self.config_path and self.label.startswith(self.CESAR_JOBS_PREFIX):
-            # for cesar TOGA creates individual config files
-            os.remove(self.config_path) if os.path.isfile(self.config_path) else None
         return self.return_code
 
 
