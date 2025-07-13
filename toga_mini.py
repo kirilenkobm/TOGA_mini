@@ -83,7 +83,6 @@ class Toga:
         TogaSanityChecker.check_args_correctness(self, args)
         self.__modules_addr()
         TogaSanityChecker.check_dependencies(self)
-        TogaSanityChecker.check_completeness(self)
         self.nextflow_dir = get_nextflow_dir(self.LOCATION, args.nextflow_dir)
 
         self.temp_wd = os.path.join(self.wd, Constants.TEMP)
@@ -299,9 +298,6 @@ class Toga:
         self.CHAIN_FILTER_BY_ID = os.path.join(
             self.LOCATION, Constants.C_BIN_DIR, "chain_filter_by_id"
         )
-        self.CHAIN_BDB_INDEX = os.path.join(
-            self.LOCATION, Constants.MODULES_DIR, "chain_bst_index.py"
-        )
         self.CHAIN_INDEX_SLIB = os.path.join(
             self.LOCATION, Constants.C_LIB_DIR, "chain_bst_lib.dylib"
         )
@@ -487,7 +483,7 @@ class Toga:
         self.temp_files.append(self.chain_class_results)
         self.temp_files.append(self.chain_cl_jobs_combined)
 
-        skipped = split_chain_jobs(
+        split_chain_jobs(
             chain_file=self.chain_file,
             bed_file=self.ref_bed,
             bed_index=self.index_bed_file,

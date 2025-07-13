@@ -31,12 +31,12 @@ def setup_logger(log_file, write_to_console=True):
     # Set up logging
     logger = logging.getLogger('toga')
     logger.setLevel(logging.INFO)
-    
+
     # Check if logger already has handlers to prevent duplicates
     if logger.handlers:
         # Logger already configured, don't add duplicate handlers
         return
-    
+
     if write_to_console:
         console_handler = logging.StreamHandler()
         console_handler.setLevel(logging.INFO)

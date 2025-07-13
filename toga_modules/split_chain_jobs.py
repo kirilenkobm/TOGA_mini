@@ -17,6 +17,7 @@ from toga_modules.common import parts
 from toga_modules.common import die
 from toga_modules.common import setup_logger
 from toga_modules.common import to_log
+from toga_modules.chain_bst_index import chain_bst_index
 
 __author__ = "Bogdan Kirilenko, 2020."
 __email__ = "bogdan.kirilenko@senckenberg.de"
@@ -120,10 +121,9 @@ def parse_args():
 
 
 def call_proc(cmd):
-    """Call a subprocess and catch errors."""
-    rc = subprocess.call(cmd, shell=True)
-    if rc != 0:
-        die(f"Error! Process {cmd} died! Abort.")
+    """Call subprocess."""
+    to_log(f"Calling {cmd}")
+    _ = subprocess.call(cmd, shell=True)
 
 
 def check_args(args):
@@ -167,10 +167,10 @@ def check_args(args):
 
     if os.path.isfile(index_file):  # check if bb file is here
         WORK_DATA["index_file"] = index_file
-    # elif args.make_index:  # create index if not exists
-    #     idbb_cmd = f"/modules/chain_bdb_index.py {args.chain_file} {index_file}"
-    #     call_proc(idbb_cmd)
-    #     WORK_DATA["index_file"] = index_file
+    elif args.make_index:  # create index if not exists
+        to_log(f"Creating index file {index_file}")
+        chain_bst_index(args.chain_file, index_file)
+        WORK_DATA["index_file"] = index_file
     else:  # die
         die(
             f"Error! Cannot find index file at {index_file}\n"
@@ -309,13 +309,13 @@ def split_chain_jobs(
     jobs_file="jobs_file",
     results_dir="results",
     errors_dir=None,
-    make_index=False,
+    make_index=True,
     index_file=None,
     ref="hg38",
     vv=False,
     rejected=None
 ):
-    """Split jobs for the chain classification with direct arguments instead of sys.argv parsing.
+    """Split jobs for the chain classification with direct arguments.
     
     Args:
         chain_file: Chain file for local alignments
@@ -325,80 +325,138 @@ def split_chain_jobs(
         quiet: Don't print to console
         parallel_logs_dir: Path to dir storing logs from each cluster job
         jobs_num: Number of cluster jobs, 800 as default
-        job_size: How many jobs to put into one cluster job. If defined, --jobs_num is ignored
+        job_size: How many jobs to put into one cluster job. If defined, jobs_num is ignored
         jobs: Directory to save lists with chains and intersected genes
         jobs_file: File containing combined jobs
         results_dir: Redirect stdout from cluster job to this dir
         errors_dir: Redirect stderr from cluster job to this dir
-        make_index: Make index file
-        index_file: BDB file containing chains. If not assigned use [chain_file].bdb as default
+        make_index: Make index file if it doesn't exist
+        index_file: BDB file containing chains. If not assigned use [chain_file]_ID_position as default
         ref: Reference species, hg38 as default
         vv: Add -v flag to unit commands
         rejected: Track rejected genes in the file given
     """
-    # Create a mock args object with the provided arguments
-    class Args:
-        def __init__(self, **kwargs):
-            for key, value in kwargs.items():
-                setattr(self, key, value)
+    setup_logger(log_file, write_to_console=not quiet)
     
-    args = Args(
-        chain_file=chain_file,
-        bed_file=bed_file,
-        bed_index=bed_index,
-        log_file=log_file,
-        quiet=quiet,
-        parallel_logs_dir=parallel_logs_dir,
-        jobs_num=jobs_num,
-        job_size=job_size,
-        jobs=jobs,
-        jobs_file=jobs_file,
-        results_dir=results_dir,
-        errors_dir=errors_dir,
-        make_index=make_index,
-        index_file=index_file,
-        ref=ref,
-        vv=vv,
-        rejected=rejected
-    )
+    # Setup and validate directories
+    try:
+        os.mkdir(jobs) if not os.path.isdir(jobs) else None
+        os.mkdir(results_dir) if not os.path.isdir(results_dir) else None
+        os.mkdir(errors_dir) if errors_dir and not os.path.isdir(errors_dir) else None
+    except FileNotFoundError as exc:
+        to_log(f"Arguments are corrupted!\n{str(exc)}")
+        die("Cannot create one of the directories requested.")
     
-    setup_logger(args.log_file, write_to_console=not args.quiet)
-    check_args(args)  # check if all the files, dependencies etc are correct
-    intersections, skipped = get_intersections()  # intersect chains and beds
-    # # extract genes that are not intersected by any chain
-    # # or chrom is not aligned at all
-    # missing_genes_not_ali = [x[0] for x in skipped]
-    if args.rejected:
-        # skipped: genes that do not intersect any chain
-        save_rejected_genes(skipped, args.rejected)
-    commands = make_commands(intersections)  # shuffle and create set of commands
-    batch = split_commands(commands)  # split the commands into cluster jobs
-    template = get_template()
-    save(template, batch, logs_dir=args.parallel_logs_dir)  # save jobs and a jobs_file file
+    # Validate input files
+    if not os.path.isfile(chain_file):
+        die(f"Error! Chain file {chain_file} is wrong!")
+    if not os.path.isfile(bed_file):
+        die(f"Error! Bed file {bed_file} is wrong!")
+    
+    to_log(f"split_chain_jobs: Use bed file {bed_file} and chain file {chain_file}")
+    
+    # Handle index file with proper path construction
+    if not index_file:
+        # Avoid double _ID_position suffixes
+        if chain_file.endswith("_ID_position"):
+            index_file = chain_file
+        else:
+            index_file = chain_file.replace(".chain", ".chain_ID_position")
+    
+    # Check if index file exists, create if needed
+    if os.path.isfile(index_file):
+        to_log(f"split_chain_jobs: Using existing index file {index_file}")
+    elif make_index:
+        to_log(f"split_chain_jobs: Creating index file {index_file}")
+        try:
+            chain_bst_index(chain_file, index_file)
+        except Exception as e:
+            to_log(f"split_chain_jobs: Warning: Failed to create index file: {e}")
+            to_log("split_chain_jobs: Continuing without index file - chain_runner may be slower")
+    else:
+        to_log(f"split_chain_jobs: Warning: Index file {index_file} not found and make_index=False")
+        to_log("split_chain_jobs: Continuing without index file - chain_runner may be slower")
+    
+    # Set up job parameters
+    job_size_to_use = job_size if job_size else None
+    jobs_num_to_use = None if job_size else jobs_num
+    
+    to_log("split_chain jobs: the run data overview is:")
+    to_log(f"* chain_file: {chain_file}")
+    to_log(f"* bed_file: {bed_file}")
+    to_log(f"* bed_index: {bed_index}")
+    to_log(f"* jobs: {jobs}")
+    to_log(f"* jobs_file: {jobs_file}")
+    to_log(f"* results_dir: {results_dir}")
+    to_log(f"* errors_dir: {errors_dir}")
+    to_log(f"* index_file: {index_file}")
+    to_log(f"* job_size: {job_size_to_use}")
+    to_log(f"* jobs_num: {jobs_num_to_use}")
+    to_log(f"* ref: {ref}")
+    to_log(f"* vv: {vv}")
+    
+    # Get intersections between chains and beds
+    to_log("split_chain_jobs: searching for intersections between reference transcripts and chains")
+    chain_genes_raw, skipped = chain_bed_intersect(chain_file, bed_file)
+    chain_genes = {k: ",".join(v) + "," for k, v in chain_genes_raw.items()}
+    del chain_genes_raw
+    
+    to_log(f"split_chain_jobs: chains-to-transcripts dict contains {len(chain_genes)} records")
+    to_log(f"split_chain_jobs: skipped {len(skipped)} transcripts that do not intersect any chain")
+    
+    # Save rejected genes if requested
+    if rejected:
+        save_rejected_genes(skipped, rejected)
+    
+    # Create commands in the format: chain_id\tgenes
+    commands = []
+    chain_genes_items = list(chain_genes.items())
+    random.shuffle(chain_genes_items)
+    
+    for chain_id, transcripts in chain_genes_items:
+        commands.append(f"{chain_id}\t{transcripts}")
+    
+    # Split commands into batches
+    to_log(f"split_chain_jobs: preparing {len(commands)} commands")
+    if job_size_to_use:
+        # divide list into chunks of job_size
+        job_size_final = job_size_to_use
+    else:
+        # if was not defined - compute the size of cluster job
+        job_size_final = (len(commands) // jobs_num_to_use) + 1
+    
+    to_log(f"split_chain_jobs: command size of {job_size_final} for each cluster job")
+    batch = list(parts(commands, n=job_size_final))
+    to_log(f"split_chain_jobs: results in {len(batch)} cluster jobs")
+    
+    # Create template for chain classification commands
+    template = CHAIN_RUNNER + " {0} " + f" {bed_index} {chain_file}"
+    if vv:
+        template += " -v"
+    
+    # Save individual job files (containing chain_id\tgenes lines)
+    filenames = {}
+    for num, job_commands in enumerate(batch):
+        job_path = os.path.join(jobs, f"part_{num}")
+        filenames[num] = job_path
+        # Write chain_id\tgenes lines to the file
+        with open(job_path, "w") as f:
+            f.write("\n".join(job_commands) + "\n")
+    
+    # Save combined jobs file (containing actual python commands to run)
+    with open(jobs_file, "w") as f:
+        for num, path in filenames.items():
+            cmd = template.format(path)
+            stdout_part = f"> {results_dir}/{num}.txt"
+            if parallel_logs_dir:
+                logs_part = f" --log_file {parallel_logs_dir}/chain_runner_{num}.log"
+            else:
+                logs_part = ""
+            jobs_file_line = f"{cmd}{logs_part} {stdout_part}\n"
+            f.write(jobs_file_line)
+    
     to_log("split_chain_jobs: estimated time: {0}".format(dt.now() - t0))
-    
-    return skipped  # Return the skipped genes for further processing
-
-
-def main():
-    """Entry point."""
-    args = parse_args()
-    setup_logger(args.log_file, write_to_console=not args.quiet)
-    check_args(args)  # check if all the files, dependencies etc are correct
-    intersections, skipped = get_intersections()  # intersect chains and beds
-    # # extract genes that are not intersected by any chain
-    # # or chrom is not aligned at all
-    # missing_genes_not_ali = [x[0] for x in skipped]
-    if args.rejected:
-        # skipped: genes that do not intersect any chain
-        save_rejected_genes(skipped, args.rejected)
-    commands = make_commands(intersections)  # shuffle and create set of commands
-    batch = split_commands(commands)  # split the commands into cluster jobs
-    template = get_template()
-    save(template, batch, logs_dir=args.parallel_logs_dir)  # save jobs and a jobs_file file
-    to_log("split_chain_jobs: estimated time: {0}".format(dt.now() - t0))
-    sys.exit(0)
 
 
 if __name__ == "__main__":
-    main()
+    pass

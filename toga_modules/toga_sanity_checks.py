@@ -46,7 +46,7 @@ class TogaSanityChecker:
 
     @staticmethod
     def check_2bit_file_completeness(two_bit_file, chroms_sizes, chrom_file):
-        """Check that 2bit file is readable."""
+        """Check that the 2bit file is readable."""
         try:  # try to catch EOFError: if 2bitreader cannot read file
             two_bit_reader = TwoBitFile(two_bit_file)
             # check what sequences are in the file:
@@ -107,7 +107,7 @@ class TogaSanityChecker:
         # if this set is non-empty: raise an error
         u_in_b = t_in_bed.difference(t_in_i)
 
-        if len(u_in_b) != 0:  # isoforms file is incomplete
+        if len(u_in_b) != 0:  # isoform file is incomplete
             extra_t_list = "\n".join(
                 list(u_in_b)[:100]
             )  # show first 100 (or maybe show all?)
@@ -140,7 +140,7 @@ class TogaSanityChecker:
 
     @staticmethod
     def check_chains_classified(chain_results_df):
-        """Check whether chain classification result is non-empty."""
+        """Check whether a chain classification result is non-empty."""
         def has_more_than_one_line(file_path):
             with open(file_path, 'r') as f:
                 return sum(1 for _ in islice(f, 2)) > 1
@@ -175,44 +175,3 @@ class TogaSanityChecker:
         )
         if c_not_compiled:
             to_log("Warning! C code is not compiled, trying to compile...")
-
-        imports_not_found = False
-        required_libraries = [
-            'twobitreader',
-            'networkx',
-            'pandas',
-            'numpy',
-            'xgboost',
-            'joblib',
-            'h5py'
-        ]
-
-        to_log("# Python package versions")
-        for lib in required_libraries:
-            try:
-                lib_module = __import__(lib)
-                if hasattr(lib_module, '__version__'):
-                    lib_version = lib_module.__version__
-                else:
-                    lib_version = 'unknown version'
-                to_log(f"* {lib}: {lib_version}")
-            except ImportError:
-                imports_not_found = True
-                to_log(f"! {lib}: Not installed - will try to install")
-
-        not_all_found = any([c_not_compiled, imports_not_found])
-
-    @staticmethod
-    def check_completeness(toga_cls):
-        """Check if all modules are presented."""
-        files_must_be = [
-            toga_cls.CHAIN_BDB_INDEX,
-            toga_cls.BED_BDB_INDEX,
-            # Removed references to deleted module paths:
-            # - MERGE_CHAINS_OUTPUT (imported directly)
-            # - CLASSIFY_CHAINS (imported directly)
-        ]
-        for _file in files_must_be:
-            if os.path.isfile(_file):
-                continue
-            toga_cls.die(f"Error! File {_file} not found!")
