@@ -288,6 +288,12 @@ def precompute_regions(
         for i in range(granges_num + 1):
             chain_coords_conv_out.append(raw_ch_conv_out[i].decode("utf-8"))
 
+        # Extract strand information from the first line (chain header)
+        chain_header = chain_coords_conv_out[0].rstrip().split()
+        # Header format: "chain tName tStrand tSize tStart tEnd qName qStrand qSize qStart qEnd"
+        reference_strand = chain_header[2]  # tStrand
+        query_strand = chain_header[7]      # qStrand
+
         for line in chain_coords_conv_out[1:]:
             # then parse the output
             # line contains information about transcript range in the query
@@ -321,12 +327,14 @@ def precompute_regions(
                 )
                 skipped.append((transcript, chain_id, "too long query locus"))
                 continue
-            # for each chain-gene pair save query region length and coordinates
+            # for each chain-gene pair save query region length, coordinates, and strand info
             # need this for required memory estimation and for orthologous loci table
             query_region = f"{q_chrom}:{q_start}-{q_end}"
             gene_chain_grange[transcript][chain_id] = {
                 "query_length": que_len,
-                "search_locus": query_region
+                "search_locus": query_region,
+                "reference_strand": reference_strand,
+                "query_strand": query_strand
             }
 
         del raw_ch_conv_out  # not sure if necessary but...
@@ -409,17 +417,19 @@ def main():
         # For each chain, add entry to orthologous loci table
         for chain_id, chain_data in chains_data.items():
             query_region = chain_data["search_locus"]
-            orthologous_loci.append((transcript, chain_id, query_region))
-            to_log(f" * added locus: {transcript} -> chain {chain_id} -> {query_region}")
+            reference_strand = chain_data["reference_strand"]
+            query_strand = chain_data["query_strand"]
+            orthologous_loci.append((transcript, chain_id, query_region, reference_strand, query_strand))
+            to_log(f" * added locus: {transcript} -> chain {chain_id} -> {query_region} (ref:{reference_strand}, query:{query_strand})")
 
     # Save orthologous loci table
     output_file = os.path.join(args.toga_out_dir, "orthologous_loci.tsv")
     to_log(f"{MODULE_NAME_FOR_LOG}: saving orthologous loci table to {output_file}")
     
     with open(output_file, "w") as f:
-        f.write("transcript_id\tchain_id\tquery_region\n")
-        for transcript_id, chain_id, query_region in orthologous_loci:
-            f.write(f"{transcript_id}\t{chain_id}\t{query_region}\n")
+        f.write("transcript_id\tchain_id\tquery_region\treference_strand\tquery_strand\n")
+        for transcript_id, chain_id, query_region, reference_strand, query_strand in orthologous_loci:
+            f.write(f"{transcript_id}\t{chain_id}\t{query_region}\t{reference_strand}\t{query_strand}\n")
     
     to_log(f"{MODULE_NAME_FOR_LOG}: saved {len(orthologous_loci)} orthologous loci")
 
