@@ -12,7 +12,6 @@ dependencies:
   - scikit-learn
   - joblib
   - h5py
-  - nextflow
   - bsddb3
   - pkg-config
   - pip

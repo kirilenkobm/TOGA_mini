@@ -16,18 +16,8 @@ class TogaSanityChecker:
     """Utility class to ensure TOGA arguments correctness."""
     @staticmethod
     def check_dir_args_safety(toga_cls, location):
-        protected_dirs = {os.path.abspath(x) for x in (location, toga_cls.wd, os.getcwd())}
-        nd_dir_abspath = os.path.abspath(toga_cls.nextflow_dir)
-        if nd_dir_abspath in protected_dirs:
-            msg = (
-                f"{SANITY_CHECKER_PREFIX}: "
-                f"Error! Nextflow directory is set to {toga_cls.nextflow_dir}. "
-                f"This directory is to be deleted after the TOGA pipeline execution. "
-                f"However, it matches one of the following dirs:\n{protected_dirs}\n"
-                f"Which must be preserved. Please, reassign the --nd argument."
-            )
-            to_log(msg)
-            toga_cls.die()
+        # No specific directory safety checks needed for ProcessPoolExecutor strategy
+        pass
         # TODO: consider other dangerous scenario
         to_log("Does it work?")
         return
@@ -154,15 +144,8 @@ class TogaSanityChecker:
     @staticmethod
     def check_dependencies(toga_cls):
         """Check all dependencies."""
-        # TODO: refactor this part - different checks depending on the selected strategy
-        not_nf = shutil.which(Constants.NEXTFLOW) is None
-        if toga_cls.para_strategy == "nextflow" and not_nf:
-            msg = (
-                "Error! Cannot fild nextflow executable. Please make sure you "
-                "have a nextflow binary in a directory listed in your $PATH"
-            )
-            toga_cls.die(msg)
-
+        # ProcessPoolExecutor is built-in to Python, no need to check for external dependencies
+        # Only check C compilation status
         c_not_compiled = any(
             os.path.isfile(f) is False
             for f in [

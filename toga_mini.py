@@ -7,6 +7,7 @@ If you need to call TOGA: most likely this is what you need.
 import argparse
 import json
 import os
+import shutil
 import sys
 import time
 from datetime import datetime as dt
@@ -26,16 +27,12 @@ from toga_modules.common import get_shared_lib_extension
 from toga_modules.filter_bed import prepare_bed_file
 from toga_modules.make_pr_pseudogenes_annotation import create_processed_pseudogenes_track
 from toga_modules.merge_chains_output import merge_chains_output
-from toga_modules.parallel_jobs_manager_helpers import get_nextflow_dir
 from toga_modules.split_chain_jobs import split_chain_jobs
 from toga_modules.create_orthologous_loci_table import create_orthologous_loci_table
 from toga_modules.stitch_fragments import stitch_scaffolds
 from toga_modules.toga_sanity_checks import TogaSanityChecker
 from toga_modules.toga_util import TogaUtil
 
-from toga_modules.parallel_jobs_manager import CustomStrategy
-from toga_modules.parallel_jobs_manager import NextflowStrategy
-from toga_modules.parallel_jobs_manager import ParaStrategy
 from toga_modules.parallel_jobs_manager import ParallelJobsManager
 
 __author__ = "Bogdan M. Kirilenko"
@@ -75,21 +72,18 @@ class Toga:
         # check if all files TOGA needs are here
         self.temp_files = []  # remove at the end, list of temp files
         to_log("#### Initiating TOGA class ####")
-        self.nextflow_config_dir = args.nextflow_config_dir
-        self.para_strategy = args.parallelization_strategy
         self.cluster_queue_name = args.cluster_queue_name
+        self.max_workers = args.max_workers
 
         self.toga_exe_path = os.path.dirname(__file__)
         self.version = "DETACHED TOGA"
         TogaSanityChecker.check_args_correctness(self, args)
         self.__modules_addr()
         TogaSanityChecker.check_dependencies(self)
-        self.nextflow_dir = get_nextflow_dir(self.LOCATION, args.nextflow_dir)
 
         self.temp_wd = os.path.join(self.wd, Constants.TEMP)
         self.project_name = self.project_name.replace("/", "")
         os.mkdir(self.temp_wd) if not os.path.isdir(self.temp_wd) else None
-        self.__check_nf_config()
 
         # check whether nothing necessary is deleted afterward
         TogaSanityChecker.check_dir_args_safety(self, LOCATION)
@@ -99,7 +93,7 @@ class Toga:
 
         chain_basename = os.path.basename(args.chain_input)
         # dir to collect log files with rejected reference genes:
-        self.rejected_dir = os.path.join(self.temp_wd, "rejected")
+        self.rejected_dir = os.path.join(self.wd, "skipped_transcripts_logs")
         os.mkdir(self.rejected_dir) if not os.path.isdir(self.rejected_dir) else None
 
         # filter chain in this folder
@@ -148,7 +142,7 @@ class Toga:
         self.index_bed_file = os.path.join(self.temp_wd, "toga_filtered_reference_annottation.hdf5")
 
         # filter bed file
-        bed_filter_rejected_file = "BED_FILTER_REJECTED.txt"
+        bed_filter_rejected_file = "skipped_on_bed_filter_stage.txt"
         bed_filter_rejected = os.path.join(self.rejected_dir, bed_filter_rejected_file)
         # keeping UTRs!
         prepare_bed_file(
@@ -173,7 +167,6 @@ class Toga:
 
         self.orthologous_chain_limit = args.orthologous_chain_limit
         self.o2o_only = args.o2o_only
-        self.keep_nf_logs = args.do_not_del_nf_logs
         self.ld_model_arg = args.ld_model
 
         self.fragmented_genome = False if args.disable_fragments_joining else True
@@ -220,22 +213,6 @@ class Toga:
 
         to_log(f"Saving output to {self.wd}")
         to_log(f"Arguments stored in {self.toga_args_file}")
-
-    def __get_paralellizer(self, selected_strategy):
-        """Initiate parallelization strategy selected by user."""
-        to_log(f"Selected parallelization strategy: {selected_strategy}")
-        if selected_strategy not in Constants.PARA_STRATEGIES:
-            msg = (f"ERROR! Strategy {selected_strategy} is not found, "
-                   f"allowed strategies are: {Constants.PARA_STRATEGIES}")
-            self.die(msg, rc=1)
-        if selected_strategy == "nextflow":
-            selected_strategy = NextflowStrategy()
-        elif selected_strategy == "para":
-            selected_strategy = ParaStrategy()
-        else:
-            selected_strategy = CustomStrategy()
-        jobs_manager = ParallelJobsManager(selected_strategy)
-        return jobs_manager
 
     def __check_param_files(self):
         """Check that all parameter files exist."""
@@ -307,41 +284,6 @@ class Toga:
             self.LOCATION, Constants.MODULES_DIR, "bed_hdf5_index.py"
         )
 
-        self.nextflow_rel_ = os.path.join(self.LOCATION, "toga_modules", "execute_joblist.nf")
-        self.NF_EXECUTE = os.path.abspath(self.nextflow_rel_)
-
-    def __check_nf_config(self):
-        """Check that nextflow configure files are here."""
-        if self.nextflow_config_dir is None:
-            # no nextflow config provided -> using local executor
-            self.local_executor = True
-            return
-        # check that required config files are here
-        if not os.path.isdir(self.nextflow_config_dir):
-            self.die(
-                f"Error! Nextflow config dir {self.nextflow_config_dir} does not exist!"
-            )
-        err_msg = (
-            "Please note these two files are expected in the nextflow config directory:\n"
-            "1) call_cesar_config_template.nf"
-            "2) extract_chain_features_config.nf"
-        )
-        # check CESAR config template first
-        nf_cesar_config_temp = os.path.join(
-            self.nextflow_config_dir, "call_cesar_config_template.nf"
-        )
-        if not os.path.isfile(nf_cesar_config_temp):
-            self.die(f"Error! File {nf_cesar_config_temp} not found!\n{err_msg}")
-        # check chain extract features config; we need abspath to this file
-        nf_chain_extr_config_file = os.path.abspath(
-            os.path.join(self.nextflow_config_dir, "extract_chain_features_config.nf")
-        )
-        if not os.path.isfile(nf_chain_extr_config_file):
-            self.die(
-                f"Error! File {nf_chain_extr_config_file} not found!\n{err_msg}"
-            )
-        self.local_executor = False
-
     def __find_two_bit(self, db):
         """Find a 2bit file."""
         if os.path.isfile(db):
@@ -405,6 +347,10 @@ class Toga:
         # 6) Create a bed track for processed pseudogenes
         to_log("\n\n#### STEP 6: Create processed pseudogenes track\n")
         self.__create_processed_pseudogenes_track()
+
+        # Cleanup
+        shutil.rmtree(self.temp_wd) if os.path.isdir(self.temp_wd) else None
+        shutil.rmtree(self.log_dir) if os.path.isdir(self.log_dir) else None
         return None
 
     def __collapse_logs(self, prefix):
@@ -479,7 +425,7 @@ class Toga:
         self.chain_cl_jobs_combined = os.path.join(
             self.temp_wd, "chain_class_jobs_combined"
         )
-        rejected_filename = "SPLIT_CHAIN_REJ.txt"
+        rejected_filename = "skipped_on_chain_split_stage.txt"
         rejected_path = os.path.join(self.rejected_dir, rejected_filename)
         self.temp_files.append(self.ch_cl_jobs)
         self.temp_files.append(self.chain_class_results)
@@ -506,7 +452,8 @@ class Toga:
         """Execute extract chain features jobs."""
         timestamp = str(time.time()).split(".")[0]
         project_name = f"chain_feats__{self.project_name}_at_{timestamp}"
-        project_path = os.path.join(self.nextflow_dir, project_name)
+        project_path = os.path.join(self.temp_wd, project_name)
+        os.makedirs(project_path, exist_ok=True)
 
         to_log(f"Extracting chain features, project name: {project_name}")
         to_log(f"Project path: {project_path}")
@@ -516,19 +463,20 @@ class Toga:
             "project_name": project_name,
             "project_path": project_path,
             "logs_dir": project_path,
-            "nextflow_dir": self.nextflow_dir,
-            "NF_EXECUTE": self.NF_EXECUTE,
-            "local_executor": self.local_executor,
-            "keep_nf_logs": self.keep_nf_logs,
-            "nextflow_config_dir": self.nextflow_config_dir,
             "temp_wd": self.temp_wd,
             "queue_name": self.cluster_queue_name
         }
 
-        # Execute jobs via the Strategy pattern
-        jobs_manager = self.__get_paralellizer(self.para_strategy)
+        # Execute jobs using ProcessPoolExecutor
+        jobs_manager = ParallelJobsManager()
         try:
-            jobs_manager.execute_jobs(self.chain_cl_jobs_combined, manager_data, project_name, wait=True)
+            jobs_manager.execute_jobs(
+                self.chain_cl_jobs_combined, 
+                manager_data, 
+                project_name, 
+                max_workers=self.max_workers,
+                wait=True
+            )
         except KeyboardInterrupt:
             TogaUtil.terminate_parallel_processes([jobs_manager, ])
 
@@ -588,22 +536,22 @@ class Toga:
             gene_fragments = stitch_scaffolds(
                 self.chain_file, self.pred_scores, self.ref_bed, True
             )
-            fragm_dict_file = os.path.join(self.temp_wd, "gene_fragments.txt")
-            f = open(fragm_dict_file, "w")
+            fragmented_dict_file = os.path.join(self.temp_wd, "gene_fragments.txt")
+            f = open(fragmented_dict_file, "w")
             for k, v in gene_fragments.items():
                 v_str = ",".join(map(str, v))
                 f.write(f"{k}\t{v_str}\n")
             f.close()
-            to_log(f"Fragments data saved to {fragm_dict_file}")
+            to_log(f"Fragments data saved to {fragmented_dict_file}")
         else:
             # no fragment file: ok
             to_log("Skip fragmented genes detection")
-            fragm_dict_file = None
+            fragmented_dict_file = None
 
         # create orthologous loci table
         to_log("Creating orthologous loci table")
         
-        skipped_path = os.path.join(self.rejected_dir, "SPLIT_CESAR.txt")
+        skipped_path = os.path.join(self.rejected_dir, "skipped.txt")
         self.paralogs_log = os.path.join(self.temp_wd, "paralogs.txt")
 
         create_orthologous_loci_table(
@@ -617,7 +565,7 @@ class Toga:
             chains_limit=self.orthologous_chain_limit,
             skipped_genes=skipped_path,
             o2o_only=self.o2o_only,
-            fragments_data=fragm_dict_file,
+            fragments_data=fragmented_dict_file,
             log_file=self.log_file,
             quiet=self.quiet
         )
@@ -682,35 +630,13 @@ def parse_args(arg_strs: list[str] = None):
         help="Find orthologs " "for a single reference chromosome only",
     )
     app.add_argument(
-        "--nextflow_dir",
-        "--nd",
-        default=None,
+        "--max_workers",
+        "--mw",
+        type=int,
+        default=10,
         help=(
-            "Nextflow working directory: from this directory nextflow is "
-            "executed, also there all nextflow log files are kept"
-        )
-    )
-    app.add_argument(
-        "--nextflow_config_dir",
-        "--nc",
-        default=None,
-        help=(
-            "Directory containing nextflow configuration files "
-            "for cluster, pls see nextflow_config_files/readme.txt "
-            "for details."
-        )
-    )
-    app.add_argument(
-        "--do_not_del_nf_logs", "--nfnd", action="store_true", dest="do_not_del_nf_logs"
-    )
-    app.add_argument(
-        "--parallelization_strategy",
-        "--ps",
-        choices=Constants.PARA_STRATEGIES,  # TODO: add snakemake
-        default="nextflow",
-        help=(
-            "The parallelization strategy to use. If custom -> please provide "
-            "a custom strategy implementation in the parallel_jobs_manager.py "
+            "Maximum number of workers for parallel processing. "
+            "Default is 10."
         )
     )
     # chain features related

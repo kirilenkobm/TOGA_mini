@@ -10,10 +10,6 @@ class Constants:
     U12_FILE_COLS = 3
     U12_AD_FIELD = {"A", "D"}
     ISOFORMS_FILE_COLS = 2
-    NF_DIR_NAME = "nextflow_logs"
-    NEXTFLOW = "nextflow"
-
-    PARA_STRATEGIES = ["nextflow", "para", "custom"]  # TODO: add snakemake
 
     TEMP_CHAIN_CLASS = "temp_chain_trans_class"
     MODULES_DIR = "toga_modules"

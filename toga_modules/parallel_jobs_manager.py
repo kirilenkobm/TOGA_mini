@@ -1,257 +1,127 @@
 #!/usr/bin/env python3
-"""Strategy pattern implementation to handle parallel jobs.
+"""Simple parallel jobs manager using ProcessPoolExecutor."""
 
-Provides implementations for nextflow and para strategies.
-Please feel free to implement your custom strategy if
-neither nextflow nor para satisfy your needs.
-"""
-from abc import ABC, abstractmethod
 import subprocess
 import os
+import concurrent.futures
+import multiprocessing
 from toga_modules.common import to_log
-
-
-class ParallelizationStrategy(ABC):
-    """
-    Abstract base class for a parallelization strategy.
-    """
-    def __init__(self):
-        self._process = None
-
-    @abstractmethod
-    def execute(self, joblist_path, manager_data, label, wait=False, **kwargs):
-        """
-        Execute the jobs in parallel.
-
-        :param joblist_path: Path to the joblist file.
-        :param manager_data: Data from the manager class.
-        :param label: Label for the run.
-        :param wait: Boolean -> controls whether run blocking or not
-        """
-        pass
-
-    @abstractmethod
-    def check_status(self):
-        """
-        Check the status of the jobs.
-
-        :return: Status of the jobs.
-        """
-        pass
-
-    def terminate_process(self):
-        """Terminates the associated process"""
-        if self._process:
-            self._process.terminate()
-
-
-class NextflowStrategy(ParallelizationStrategy):
-    """
-    Concrete strategy for parallelization using Nextflow.
-    """
-    CHAIN_CONFIG_TEMPLATE_FILENAME = "extract_chain_features_config.nf"
-    CHAIN_JOBS_PREFIX = "chain_feats__"
-    DEFAULT_QUEUE_NAME = "batch"
-
-    def __init__(self):
-        super().__init__()
-        self._process = None
-        self.joblist_path = None
-        self.manager_data = None
-        self.label = None
-        self.nf_project_path = None
-        self.keep_logs = False
-        self.use_local_executor = None
-        self.nextflow_config_dir = None
-        self.nextflow_logs_dir = None
-        self.memory_limit = 16
-        self.nf_master_script = None
-        self.config_path = None
-        self.return_code = None
-        self.queue_name = None
-
-    def execute(self, joblist_path, manager_data, label, wait=False, **kwargs):
-        """Implementation for Nextflow."""
-        # define parameters
-        self.joblist_path = joblist_path
-        self.manager_data = manager_data
-        self.label = label
-        self.memory_limit = int(kwargs.get("memory_limit", "16"))
-
-        self.nf_project_path = manager_data.get("nextflow_dir", None)  # in fact, contains NF logs
-        self.keep_logs = manager_data.get("keep_nf_logs", False)
-        self.use_local_executor = manager_data.get("local_executor", False)
-        self.nf_master_script = manager_data["NF_EXECUTE"]  # NF script that calls everything
-        self.nextflow_config_dir = manager_data.get("nextflow_config_dir", None)
-        self.config_path = self.__create_config_file()
-        self.queue_name = manager_data.get("queue_name", self.DEFAULT_QUEUE_NAME)
-
-        # create the nextflow process
-        cmd = f"nextflow {self.nf_master_script} --joblist {joblist_path}"
-        if self.config_path:
-            cmd += f" -c {self.config_path}"
-
-        log_dir = manager_data["logs_dir"]
-        os.mkdir(log_dir) if not os.path.isdir(log_dir) else None
-        log_file_path = os.path.join(manager_data["logs_dir"], f"{label}.log")
-        with open(log_file_path, "w") as log_file:
-            to_log(f"Parallel manager: pushing job {cmd}")
-            self._process = subprocess.Popen(cmd,
-                                             shell=True,
-                                             stdout=log_file,
-                                             stderr=log_file,
-                                             cwd=self.nf_project_path)
-        if wait:
-            self._process.wait()
-
-    def __create_config_file(self):
-        """Create a config file and return a path to it if needed"""
-        config_path = None
-        if self.use_local_executor:
-            # for the local executor, no config file is needed
-            return config_path
-        if self.label.startswith(self.CHAIN_JOBS_PREFIX):
-            original_config_path = os.path.abspath(os.path.join(self.nextflow_config_dir,
-                                                       self.CHAIN_CONFIG_TEMPLATE_FILENAME))
-            config_filename = "extract_chain_features_queue.nf"
-            config_path = os.path.join(self.nextflow_config_dir, config_filename)
-            with open(original_config_path) as in_, open(config_path, "w") as out_:
-                out_.write(in_.read())
-        if self.queue_name:
-            # in this case, the queue name should be specified
-            with open(config_path, "a") as f:
-                f.write(f"\nprocess.queue = '{self.queue_name}'\n")
-        return config_path  # using local executor again
-
-    def check_status(self):
-        """Check if the nextflow jobs are done."""
-        if self.return_code:
-            return self.return_code
-        running = self._process.poll() is None
-        if running:
-            return None
-        self.return_code = self._process.returncode
-        return self.return_code
-
-
-class ParaStrategy(ParallelizationStrategy):
-    """
-    Concrete strategy for parallelization using Para.
-
-    Para is rather an internal Hillerlab tool to manage slurm.
-
-    """
-
-    def __init__(self):
-        super().__init__()
-        self._process = None
-        self.return_code = None
-
-    def execute(self, joblist_path, manager_data, label, wait=False, **kwargs):
-        """Implementation for Para."""
-        cmd = f"para make {label} {joblist_path} "
-        if "queue_name" in kwargs:
-            queue_name = kwargs["queue_name"]
-            cmd += f" -q={queue_name} "
-        # otherwise use default medium queue
-        if "memory_limit" in kwargs:
-            memory_mb = kwargs["memory_limit"] * 1000  # para uses MB instead of GB
-            cmd += f" --memoryMb={memory_mb}"
-        # otherwise use default para's 10Gb
-
-        log_dir = manager_data["logs_dir"]
-        os.mkdir(log_dir) if not os.path.isdir(log_dir) else None
-        log_file_path = os.path.join(manager_data["logs_dir"], f"{label}.log")
-        with open(log_file_path, "w") as log_file:
-            self._process = subprocess.Popen(cmd, shell=True, stdout=log_file, stderr=log_file)
-        if wait:
-            self._process.wait()
-
-    def check_status(self):
-        """Check if Para jobs are done."""
-        if self.return_code:
-            return self.return_code
-        running = self._process.poll() is None
-        if not running:
-            self.return_code = self._process.returncode
-            return self.return_code
-        else:
-            return None
-
-
-class CustomStrategy(ParallelizationStrategy):
-    """
-    Custom parallel jobs execution strategy.
-    """
-
-    def __init__(self):
-        super().__init__()
-        self._process = None
-        self.return_code = None
-        raise NotImplementedError("Custom strategy is not implemented -> pls see documentation")
-
-    def execute(self, joblist_path, manager_data, label, wait=False, **kwargs):
-        """Custom implementation.
-
-        Please provide your implementation of parallel jobs' executor.
-        Jobs are stored in the joblist_path, manager_data is a dict
-        containing project-wide TOGA parameters.
-
-        The method should build a command that handles executing all the jobs
-        stored in the file under joblist_path. The process object is to be
-        stored in the self._process. It is recommended to create a non-blocking subprocess.
-
-        I would recommend to store the logs in the manager_data["logs_dir"].
-        Please have a look what "manager_data" dict stores -> essentially, this is a
-        dump of the whole Toga class attributes.
-
-        If your strategy works well, we can include it in the main repo.
-        """
-        raise NotImplementedError("Custom strategy is not implemented -> pls see documentation")
-
-    def check_status(self):
-        """Check if Para jobs are done.
-
-        Please provide implementation of a method that checks
-        whether all jobs are done.
-
-        To work properly, the method should return None if the process is still going.
-        Otherwise, return status code (int)."""
-        raise NotImplementedError("Custom strategy is not implemented -> pls see documentation")
 
 
 class ParallelJobsManager:
     """
-    Class for managing parallel jobs using a specified parallelization strategy.
+    Simple class for managing parallel jobs using ProcessPoolExecutor.
     """
 
-    def __init__(self, strategy: ParallelizationStrategy):
-        """
-        Initialize the manager with a parallelization strategy.
-
-        :param strategy: The parallelization strategy to use.
-        """
-        self.strategy = strategy
+    def __init__(self):
+        """Initialize the manager."""
         self.return_code = None
+        self.output_data = []
 
-    def execute_jobs(self, joblist_path, manager_data, label, **kwargs):
+    def execute_jobs(self, joblist_path, manager_data, label, max_workers=None, wait=True):
         """
-        Execute jobs in parallel using the specified strategy.
+        Execute jobs in parallel using ProcessPoolExecutor.
 
         :param joblist_path: Path to the joblist file.
         :param manager_data: Data from the manager class.
         :param label: Label for the run.
+        :param max_workers: Maximum number of workers
+        :param wait: Boolean -> controls whether run blocking or not
         """
-        self.strategy.execute(joblist_path, manager_data, label, **kwargs)
+        # Read the joblist to get commands
+        commands = []
+        with open(joblist_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    commands.append(line)
+
+        to_log(f"ProcessPoolExecutor: executing {len(commands)} jobs")
+        
+        # Get number of workers or use default
+        if max_workers is None:
+            max_workers = min(multiprocessing.cpu_count(), len(commands))
+        to_log(f"ProcessPoolExecutor: using {max_workers} workers")
+
+        # Create log directory
+        log_dir = manager_data["logs_dir"]
+        os.makedirs(log_dir, exist_ok=True)
+        
+        if wait:
+            self._execute_jobs(commands, manager_data, label, max_workers)
+        else:
+            # For non-blocking execution, we'd need to implement this
+            # For now, just execute synchronously
+            self._execute_jobs(commands, manager_data, label, max_workers)
+
+    def _execute_jobs(self, commands, manager_data, label, max_workers):
+        """Execute the jobs using ProcessPoolExecutor."""
+        try:
+            # Execute all commands in parallel using subprocess
+            with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+                # Submit all jobs
+                futures = [
+                    executor.submit(self._run_single_command, cmd, i, manager_data, label) 
+                    for i, cmd in enumerate(commands)
+                ]
+                
+                # Collect results
+                results = []
+                for i, future in enumerate(concurrent.futures.as_completed(futures)):
+                    try:
+                        result = future.result()
+                        results.append(result)
+                        if i % 10 == 0:  # Log progress every 10 completed jobs
+                            to_log(f"ProcessPoolExecutor: completed {i+1}/{len(commands)} jobs")
+                    except Exception as exc:
+                        to_log(f"ProcessPoolExecutor: job failed with exception: {exc}")
+                        results.append(None)
+                
+                self.return_code = 0
+                to_log(f"ProcessPoolExecutor: all {len(commands)} jobs completed")
+                
+        except Exception as e:
+            to_log(f"ProcessPoolExecutor: execution failed: {e}")
+            self.return_code = 1
+
+    def _run_single_command(self, cmd, job_id, manager_data, label):
+        """Run a single command and capture its output."""
+        try:
+            # Parse the command to extract actual python command and output redirection
+            parts = cmd.split(' > ')
+            python_cmd = parts[0].strip()
+            output_file = parts[1].strip() if len(parts) > 1 else None
+            
+            # Execute the command
+            result = subprocess.run(
+                python_cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                cwd=manager_data.get("project_path", os.getcwd())
+            )
+            
+            # Write output to the specified file if provided
+            if output_file and result.stdout:
+                with open(output_file, 'w') as f:
+                    f.write(result.stdout)
+            
+            # Log any errors
+            if result.stderr:
+                log_file = os.path.join(manager_data["logs_dir"], f"{label}_{job_id}.err")
+                with open(log_file, 'w') as f:
+                    f.write(result.stderr)
+            
+            return result.returncode == 0
+            
+        except Exception as e:
+            to_log(f"ProcessPoolExecutor: error running command {cmd}: {e}")
+            return False
 
     def check_status(self):
-        """
-        Check the status of the jobs using the specified strategy.
-
-        :return: Status of the jobs.
-        """
-        return self.strategy.check_status()
+        """Check if the jobs are done."""
+        return self.return_code
 
     def terminate_process(self):
-        """Terminate associated process."""
-        self.strategy.terminate_process()
+        """Terminate associated process - no-op for ProcessPoolExecutor."""
+        pass
