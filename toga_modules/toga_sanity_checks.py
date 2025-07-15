@@ -15,14 +15,6 @@ U12_FILE_COLS = 3
 class TogaSanityChecker:
     """Utility class to ensure TOGA arguments correctness."""
     @staticmethod
-    def check_dir_args_safety(toga_cls, location):
-        # No specific directory safety checks needed for ProcessPoolExecutor strategy
-        pass
-        # TODO: consider other dangerous scenario
-        to_log("Does it work?")
-        return
-
-    @staticmethod
     def check_args_correctness(toga_cls, args):
         """Check that arguments are correct.
 

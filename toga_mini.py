@@ -71,15 +71,12 @@ class Toga:
         self.max_workers = args.max_workers
 
         self.toga_exe_path = os.path.dirname(__file__)
-        self.version = "DETACHED TOGA"
+        self.version = "TOGA-mini-dev"
         TogaSanityChecker.check_args_correctness(self, args)
         self.__modules_addr()
         self.temp_wd = os.path.join(self.wd, Constants.TEMP)
         self.project_name = self.project_name.replace("/", "")
         os.mkdir(self.temp_wd) if not os.path.isdir(self.temp_wd) else None
-
-        # check whether nothing necessary is deleted afterward
-        TogaSanityChecker.check_dir_args_safety(self, LOCATION)
 
         # to avoid crash on filesystem without locks:
         os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
@@ -267,12 +264,7 @@ class Toga:
         self.CHAIN_COORDS_CONVERT_LIB = os.path.join(
             self.LOCATION, Constants.C_LIB_DIR, f"chain_coords_converter_slib{lib_ext}"
         )
-        self.EXTRACT_SUBCHAIN_LIB = os.path.join(
-            self.LOCATION, Constants.C_LIB_DIR, f"extract_subchain_slib{lib_ext}"
-        )
-        self.CHAIN_FILTER_BY_ID = os.path.join(
-            self.LOCATION, Constants.C_BIN_DIR, "chain_filter_by_id"
-        )
+
         self.CHAIN_INDEX_SLIB = os.path.join(
             self.LOCATION, Constants.C_LIB_DIR, f"chain_bst_lib{lib_ext}"
         )
