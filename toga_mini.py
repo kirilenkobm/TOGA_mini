@@ -29,7 +29,6 @@ from toga_modules.merge_chains_output import merge_chains_output
 from toga_modules.create_orthologous_loci_table import create_orthologous_loci_table
 from toga_modules.stitch_fragments import stitch_scaffolds
 from toga_modules.toga_sanity_checks import TogaSanityChecker
-from toga_modules.toga_util import TogaUtil
 
 __author__ = "Bogdan M. Kirilenko"
 __github__ = "https://github.com/kirilenkobm"
@@ -132,8 +131,8 @@ class Toga:
         )
 
         # bed define bed files addresses
-        self.ref_bed = os.path.join(self.temp_wd, "toga_filtered_reference_annottation.bed")
-        self.index_bed_file = os.path.join(self.temp_wd, "toga_filtered_reference_annottation.hdf5")
+        self.ref_bed = os.path.join(self.temp_wd, "toga_filtered_reference_annotation.bed")
+        self.index_bed_file = os.path.join(self.temp_wd, "toga_filtered_reference_annotation.hdf5")
         
         # chain processing directory
         self.results_dir = os.path.join(self.temp_wd, "chain_classification_results")
@@ -176,7 +175,7 @@ class Toga:
 
         self.chain_results_df = os.path.join(self.wd, "chain_features.tsv")
 
-        self.bed_fragm_exons_data = os.path.join(
+        self.bed_fragmented_exons_data = os.path.join(
             self.temp_wd, "bed_fragments_to_exons.tsv"
         )
 
@@ -227,19 +226,19 @@ class Toga:
             elif not os.path.isfile(item):
                 self.die(f"Error! File {item} not found!")
 
-        # sanity checks: check that bed file chroms match reference 2bit
+        # sanity checks: check that bed file chromosomes match reference 2bit
         with open(self.ref_bed, "r") as f:
             lines = [line.rstrip().split("\t") for line in f]
             t_in_bed = set(x[3] for x in lines)
-            chroms_in_bed = set(x[0] for x in lines)
+            chromosomes_in_bed = set(x[0] for x in lines)
             # 2bit check function accepts a dict chrom: size
             # from a bed12 file we cannot infer sequence length
             # None is just a placeholder that indicated that we don't need
             # to compare chrom lengths with 2bit
-            chrom_sizes_in_bed = {x: None for x in chroms_in_bed}
+            chrom_sizes_in_bed = {x: None for x in chromosomes_in_bed}
         self.isoforms = TogaSanityChecker.check_isoforms_file(self.isoforms_arg, t_in_bed, self.temp_wd)
         TogaSanityChecker.check_2bit_file_completeness(self.t_2bit, chrom_sizes_in_bed, self.ref_bed)
-        # need to check that chain chroms and their sizes match 2bit file data
+        # need to check that chain chromosomes and their sizes match 2bit file data
         with open(self.chain_file, "r") as f:
             header_lines = [x.rstrip().split() for x in f if x.startswith("chain")]
             t_chrom_to_size = {x[2]: int(x[3]) for x in header_lines}
@@ -285,13 +284,6 @@ class Toga:
         """Find a 2bit file."""
         if os.path.isfile(db):
             return os.path.abspath(db)
-        # For now here is a hillerlab-oriented solution
-        # you can write your own template for 2bit files location
-        with_alias = f"/projects/hillerlab/genome/gbdb-HL/{db}/{db}.2bit"
-        if os.path.isfile(with_alias):
-            return with_alias
-        elif os.path.islink(with_alias):
-            return os.path.abspath(os.readlink(with_alias))
         self.die(f"Two bit file {db} not found! Abort")
         return None
 
@@ -336,7 +328,6 @@ class Toga:
 
         # 5) create cluster jobs for CESAR2.0
         to_log("\n\n#### STEP 5: Create orthologous loci table")
-        # experimental feature, not publically available:
         self.__create_orthologous_loci_table()
         self.__time_mark("Orthologous loci table created")
         if up_to_and_incl is not None and up_to_and_incl == 5: return None
@@ -411,8 +402,7 @@ class Toga:
         self.temp_files.append(self.index_bed_file)
 
     def __split_chain_jobs(self):
-        """Create results directory for parallel processing."""
-        # Just create the results directory - no joblist files needed anymore
+        """Create the results directory for parallel processing."""
         os.makedirs(self.results_dir, exist_ok=True)
 
     def __extract_chain_features(self):
