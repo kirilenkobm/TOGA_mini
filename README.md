@@ -23,8 +23,6 @@ conda env create -f environment.yaml
 ./configure.sh
 ```
 
-A unified `configure.sh` installation script is planned.
-
 ## 📂 Usage
 
 To be added. For now, refer to the original TOGA documentation for general guidance.
