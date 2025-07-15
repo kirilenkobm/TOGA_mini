@@ -140,21 +140,3 @@ class TogaSanityChecker:
             msg = f"Chain results file {chain_results_df} is empty! Abort."
             to_log(msg)
             raise ValueError(msg)
-
-    @staticmethod
-    def check_dependencies(toga_cls):
-        """Check all dependencies."""
-        # ProcessPoolExecutor is built-in to Python, no need to check for external dependencies
-        # Only check C compilation status
-        c_not_compiled = any(
-            os.path.isfile(f) is False
-            for f in [
-                toga_cls.CHAIN_SCORE_FILTER,
-                toga_cls.CHAIN_COORDS_CONVERT_LIB,
-                toga_cls.CHAIN_FILTER_BY_ID,
-                toga_cls.EXTRACT_SUBCHAIN_LIB,
-                toga_cls.CHAIN_INDEX_SLIB,
-            ]
-        )
-        if c_not_compiled:
-            to_log("Warning! C code is not compiled, trying to compile...")

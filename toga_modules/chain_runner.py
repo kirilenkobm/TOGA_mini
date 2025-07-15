@@ -9,13 +9,13 @@ import argparse
 import sys
 import os
 from datetime import datetime as dt
-from overlap_select import overlap_select
-from common import bed_extract_id
-from common import make_cds_track
-from common import die
-from common import load_chain_dict
-from common import setup_logger
-from common import to_log
+from toga_modules.overlap_select import overlap_select
+from toga_modules.common import bed_extract_id
+from toga_modules.common import make_cds_track
+from toga_modules.common import die
+from toga_modules.common import load_chain_dict
+from toga_modules.common import setup_logger
+from toga_modules.common import to_log
 
 __author__ = "Bogdan M. Kirilenko"
 

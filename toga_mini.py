@@ -9,7 +9,6 @@ import json
 import os
 import shutil
 import sys
-import time
 from datetime import datetime as dt
 from typing import Optional
 
@@ -27,13 +26,10 @@ from toga_modules.common import get_shared_lib_extension
 from toga_modules.filter_bed import prepare_bed_file
 from toga_modules.make_pr_pseudogenes_annotation import create_processed_pseudogenes_track
 from toga_modules.merge_chains_output import merge_chains_output
-from toga_modules.split_chain_jobs import split_chain_jobs
 from toga_modules.create_orthologous_loci_table import create_orthologous_loci_table
 from toga_modules.stitch_fragments import stitch_scaffolds
 from toga_modules.toga_sanity_checks import TogaSanityChecker
 from toga_modules.toga_util import TogaUtil
-
-from toga_modules.parallel_jobs_manager import ParallelJobsManager
 
 __author__ = "Bogdan M. Kirilenko"
 __github__ = "https://github.com/kirilenkobm"
@@ -52,7 +48,7 @@ class Toga:
             _dirname = os.path.dirname(args.project_dir)
             self.project_name = os.path.basename(_dirname)
         else:
-            self.project_name = TogaUtil.generate_project_name()
+            self.project_name = self.generate_project_name()
         # create a project dir
         self.wd: str = (  # had to add annotation to supress typing warnings in PyCharm 2023.3
             os.path.abspath(args.project_dir)
@@ -79,8 +75,6 @@ class Toga:
         self.version = "DETACHED TOGA"
         TogaSanityChecker.check_args_correctness(self, args)
         self.__modules_addr()
-        TogaSanityChecker.check_dependencies(self)
-
         self.temp_wd = os.path.join(self.wd, Constants.TEMP)
         self.project_name = self.project_name.replace("/", "")
         os.mkdir(self.temp_wd) if not os.path.isdir(self.temp_wd) else None
@@ -140,6 +134,9 @@ class Toga:
         # bed define bed files addresses
         self.ref_bed = os.path.join(self.temp_wd, "toga_filtered_reference_annottation.bed")
         self.index_bed_file = os.path.join(self.temp_wd, "toga_filtered_reference_annottation.hdf5")
+        
+        # chain processing directory
+        self.results_dir = os.path.join(self.temp_wd, "chain_classification_results")
 
         # filter bed file
         bed_filter_rejected_file = "skipped_on_bed_filter_stage.txt"
@@ -414,77 +411,44 @@ class Toga:
         self.temp_files.append(self.index_bed_file)
 
     def __split_chain_jobs(self):
-        """Wrap split_jobs.py script."""
-        # define arguments
-        #  to save split jobs
-        self.ch_cl_jobs = os.path.join(self.temp_wd, "chain_classification_jobs")
-        # for raw results of this stage
-        self.chain_class_results = os.path.join(
-            self.temp_wd, "chain_classification_results"
-        )
-        self.chain_cl_jobs_combined = os.path.join(
-            self.temp_wd, "chain_class_jobs_combined"
-        )
-        rejected_filename = "skipped_on_chain_split_stage.txt"
-        rejected_path = os.path.join(self.rejected_dir, rejected_filename)
-        self.temp_files.append(self.ch_cl_jobs)
-        self.temp_files.append(self.chain_class_results)
-        self.temp_files.append(self.chain_cl_jobs_combined)
-
-        split_chain_jobs(
-            chain_file=self.chain_file,
-            bed_file=self.ref_bed,
-            bed_index=self.index_bed_file,
-            log_file=self.log_file,
-            parallel_logs_dir=self.log_dir,
-            jobs_num=self.chain_jobs,
-            jobs=self.ch_cl_jobs,
-            jobs_file=self.chain_cl_jobs_combined,
-            results_dir=self.chain_class_results,
-            rejected=rejected_path,
-            quiet=self.quiet
-        )
-        
-        # collect transcripts aren't intersected at all here
-        self._transcripts_not_intersected = get_fst_col(rejected_path)
+        """Create results directory for parallel processing."""
+        # Just create the results directory - no joblist files needed anymore
+        os.makedirs(self.results_dir, exist_ok=True)
 
     def __extract_chain_features(self):
-        """Execute extract chain features jobs."""
-        timestamp = str(time.time()).split(".")[0]
-        project_name = f"chain_feats__{self.project_name}_at_{timestamp}"
-        project_path = os.path.join(self.temp_wd, project_name)
-        os.makedirs(project_path, exist_ok=True)
-
-        to_log(f"Extracting chain features, project name: {project_name}")
-        to_log(f"Project path: {project_path}")
-
-        # Prepare common data for the strategy to use
-        manager_data = {
-            "project_name": project_name,
-            "project_path": project_path,
-            "logs_dir": project_path,
-            "temp_wd": self.temp_wd,
-            "queue_name": self.cluster_queue_name
-        }
-
-        # Execute jobs using ProcessPoolExecutor
-        jobs_manager = ParallelJobsManager()
+        """Execute extract chain features jobs using direct parallel processing."""
+        from toga_modules.parallel_chain_runner import run_parallel_chain_extraction
+        
+        to_log("Extracting chain features using direct parallel processing")
+        
+        # Run the parallel chain extraction
         try:
-            jobs_manager.execute_jobs(
-                self.chain_cl_jobs_combined, 
-                manager_data, 
-                project_name, 
+            result_files = run_parallel_chain_extraction(
+                chain_file=self.chain_file,
+                bed_file=self.ref_bed,
+                bed_index=self.index_bed_file,
+                results_dir=self.results_dir,
                 max_workers=self.max_workers,
-                wait=True
+                log_file=self.log_file,
+                quiet=self.quiet
             )
         except KeyboardInterrupt:
-            TogaUtil.terminate_parallel_processes([jobs_manager, ])
+            to_log("Chain feature extraction interrupted by user")
+            raise
+        
+        to_log(f"Chain feature extraction completed. Results in: {result_files}")
+
+        # Store the path to the results for the merge step
+        if result_files:
+            self.chain_results_file = result_files[0]
+        else:
+            self.die("No results generated from chain feature extraction!")
 
     def __merge_chains_output(self):
         """Call parse results."""
         # define where to save intermediate table
         merge_chains_output(
-            self.ref_bed, self.isoforms, self.chain_class_results, self.chain_results_df
+            self.ref_bed, self.isoforms, self.results_dir, self.chain_results_df
         )
         # .append(self.chain_results_df)  -> UCSC plugin needs that
 
@@ -569,6 +533,13 @@ class Toga:
             log_file=self.log_file,
             quiet=self.quiet
         )
+
+    @staticmethod
+    def generate_project_name():
+        """Generate project name automatically."""
+        today_and_now = dt.now().strftime("%Y.%m.%d_at_%H:%M:%S")
+        project_name = f"TOGA_project_on_{today_and_now}"
+        return project_name
 
 
 def parse_args(arg_strs: list[str] = None):
