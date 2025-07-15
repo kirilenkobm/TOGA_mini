@@ -10,6 +10,7 @@ from datetime import datetime as dt
 import ctypes
 
 from toga_modules.common import chain_extract_id
+from toga_modules.common import load_chain_dict
 from toga_modules.common import make_cds_track
 from toga_modules.common import die
 from toga_modules.common import setup_logger
@@ -30,7 +31,6 @@ SPAN = "SPAN"
 MODULE_NAME_FOR_LOG = "create_orthologous_loci_table"
 
 # connect shared lib; define input and output data types
-from toga_modules.toga_util import TogaUtil
 chain_coords_conv_lib_path = os.path.join(
     LOCATION, "..", "util_c", "lib", f"libchain_coords_converter_slib{get_shared_lib_extension()}"
 )
@@ -45,8 +45,25 @@ ch_lib.chain_coords_converter.argtypes = [
 ch_lib.chain_coords_converter.restype = ctypes.POINTER(ctypes.c_char_p)
 
 
+def extract_chain_fast(chain_file, chain_dict, chain_id):
+    """Extract chain string using chain dictionary - faster than chain_extract_id.
+    
+    Similar to the approach used in chain_runner.py and other modules.
+    """
+    chain_id_int = int(chain_id)
+    if chain_id_int not in chain_dict:
+        # Fall back to the original method if not found
+        return None
+    
+    start_byte, offset = chain_dict[chain_id_int]
+    with open(chain_file, "rb") as f:
+        f.seek(start_byte)
+        chain_data = f.read(offset).decode("utf-8")
+    return chain_data
+
+
 def read_orthologs(orthologs_file, only_o2o=False, annotate_paralogs=False):
-    """Read orthologs file."""
+    """Read the orthologs file."""
     # convert fields param string to list
     # fields = [x.upper() for x in fields_raw.split(",") if x != ""]
     to_log(f"{MODULE_NAME_FOR_LOG}: reading orthology data...")
@@ -103,8 +120,6 @@ def read_orthologs(orthologs_file, only_o2o=False, annotate_paralogs=False):
             selected_field = SPAN
         else:
             selected_field = PARALOG
-
-        to_log(f"* selected chain class to annotate transcript {transcript}: {selected_field}")
 
         selected = chains[selected_field].copy()
         # mark a used field
@@ -191,6 +206,14 @@ def precompute_regions(
         for chain_id in chains:
             chain_to_genes[chain_id].append(transcript)
 
+    # Try to load chain dictionary for faster extraction
+    chain_file = bdb_chain_file.replace(".bst", ".chain")
+    index_file = chain_file.replace(".chain", ".chain_ID_position")
+    chain_dict = None
+    
+    if os.path.isfile(index_file):
+        chain_dict = load_chain_dict(index_file)  # Load once
+
     # read regions themselves
     gene_chain_grange = defaultdict(dict)
     chains_num, iter_num = len(chain_to_genes.keys()), 0
@@ -198,8 +221,19 @@ def precompute_regions(
     to_log(f"{MODULE_NAME_FOR_LOG}: for each of {task_size} involved chains, precompute regions")
 
     for chain_id, genes in chain_to_genes.items():
-        # extract chain itself
-        chain_body = chain_extract_id(bdb_chain_file, chain_id).encode()
+        # extract chain itself - try fast method first, fall back to original if needed
+        chain_body = None
+        if chain_dict is not None:
+            try:
+                chain_text = extract_chain_fast(chain_file, chain_dict, chain_id)
+                if chain_text is not None:
+                    chain_body = chain_text.encode()
+            except Exception:
+                pass  # Fall back to original
+
+        if chain_body is None:
+            # Use original method as fallback
+            chain_body = chain_extract_id(bdb_chain_file, chain_id).encode()
         all_gene_ranges = []
         for transcript in genes:
             # get genomic coordinates for each gene
@@ -264,10 +298,6 @@ def precompute_regions(
             high_abs_len = len_delta > ABS_LENGTH_TRH
             long_loci_field = field == SPAN
             if (high_rel_len or high_abs_len) and long_loci_field:
-                to_log(
-                    f" * !!skipping transcript {transcript} / chain "
-                    f"{chain_id} orthologous locus: too long query region"
-                )
                 skipped.append((transcript, chain_id, "too long query locus"))
                 continue
             # for each chain-gene pair save query region length, coordinates, and strand info
@@ -299,8 +329,6 @@ def read_fragments_data(in_file):
         line_data = line.rstrip().split("\t")
         gene = line_data[0]
         chain_str = line_data[1]
-        # chains = [int(x) for x in line_data.split(",") if x != ""]
-        # actually there are strings:
         chains = [x for x in chain_str.split(",") if x != ""]
         ret[gene] = chains
     f.close()
@@ -403,7 +431,6 @@ def create_orthologous_loci_table(
             reference_strand = chain_data["reference_strand"]
             query_strand = chain_data["query_strand"]
             orthologous_loci.append((transcript, chain_id, query_region, reference_strand, query_strand))
-            to_log(f" * added locus: {transcript} -> chain {chain_id} -> {query_region} (ref:{reference_strand}, query:{query_strand})")
 
     # Save orthologous loci table
     output_file = os.path.join(toga_out_dir, "orthologous_loci.tsv")
