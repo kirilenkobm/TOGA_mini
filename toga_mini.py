@@ -150,7 +150,6 @@ class Toga:
         self.isoforms = None  # will be assigned after a completeness check
         self.time_log = args.time_marks
         self.rejected_log = os.path.join(self.wd, "genes_rejection_reason.tsv")
-        self.keep_temp = True if args.keep_temp else False
 
         # define to call CESAR or not to call
         self.t_2bit = self.__find_two_bit(args.tDB)
@@ -158,7 +157,6 @@ class Toga:
 
         self.orthologous_chain_limit = args.orthologous_chain_limit
         self.o2o_only = args.o2o_only
-        self.ld_model_arg = args.ld_model
         self.use_parallel_loci = not args.disable_parallel_loci
 
         self.fragmented_genome = False if args.disable_fragments_joining else True
@@ -247,9 +245,6 @@ class Toga:
         """Show msg in stderr, exit with the rc given."""
         to_log(msg)
         to_log(f"Program finished with exit code {rc}\n")
-        # for t_file in self.temp_files: # remove temp files if required
-        #     os.remove(t_file) if os.path.isfile(t_file) and not self.keep_temp else None
-        #     shutil.rmtree(t_file) if os.path.isdir(t_file) and not self.keep_temp else None
         self.__mark_crashed()
         sys.exit(rc)
 
@@ -441,11 +436,7 @@ class Toga:
         self.pred_scores = os.path.join(self.wd, "orthology_scores.tsv")
         self.se_model = os.path.join(self.LOCATION, "chain_class_models", "se_model.dat")
         self.me_model = os.path.join(self.LOCATION, "chain_class_models", "me_model.dat")
-        self.ld_model = os.path.join(
-            self.LOCATION, "long_distance_model", "long_dist_model.dat"
-        )
         cl_rej_log = os.path.join(self.rejected_dir, "classify_chains_rejected.txt")
-        ld_arg_ = self.ld_model if self.ld_model_arg else None
 
         if not os.path.isfile(self.se_model) or not os.path.isfile(self.me_model):
             self.die(f"Cannot find {self.se_model} or {self.me_model} models!")
@@ -458,7 +449,6 @@ class Toga:
             rejected=cl_rej_log,
             raw_out=self.pred_scores,
             annot_threshold=self.orthology_score_threshold,
-            ld_model=ld_arg_,
         )
         # extract not classified transcripts
         # first column in the rejected log
@@ -543,13 +533,11 @@ def parse_args(arg_strs: list[str] = None):
 
     # global ops
     app.add_argument(
-        "--project_dir",
-        "--pd",
+        "project_dir",
         default=None,
         help=(
             "Project directory. TOGA will save all intermediate and output files "
-            "exactly in this directory. If not specified, use CURRENT_DIR/PROJECT_NAME "
-            "as default (see below)."
+            "exactly in this directory."
         )
     )
     app.add_argument(
@@ -564,13 +552,6 @@ def parse_args(arg_strs: list[str] = None):
     )
     app.add_argument(
         "--isoforms", "-i", type=str, default="", help="Path to isoforms data file"
-    )
-    app.add_argument(
-        "--keep_temp",
-        "--kt",
-        action="store_true",
-        dest="keep_temp",
-        help="Do not remove temp files.",
     )
     app.add_argument(
         "--quiet",
@@ -638,12 +619,6 @@ def parse_args(arg_strs: list[str] = None):
         dest="disable_fragments_joining",
         action="store_true",
         help="Disable assembling query genes from pieces",
-    )
-    app.add_argument(
-        "--ld_model",
-        dest="ld_model",
-        action="store_true",
-        help="Apply extra classifier for molecular distances ~1sps.",
     )
     app.add_argument(
         "--disable_parallel_loci",
