@@ -8,6 +8,8 @@ import os
 from collections import defaultdict
 from datetime import datetime as dt
 import ctypes
+import concurrent.futures
+import multiprocessing
 
 from toga_modules.common import chain_extract_id
 from toga_modules.common import load_chain_dict
@@ -21,7 +23,7 @@ __author__ = "Bogdan M. Kirilenko"
 
 LOCATION = os.path.dirname(__file__)
 
-REL_LENGTH_THR = 50
+REL_LENGTH_THR = 14  # for shorter RNAs
 ABS_LENGTH_TRH = 1_000_000
 
 ORTHOLOG = "ORTH"
@@ -43,6 +45,52 @@ ch_lib.chain_coords_converter.argtypes = [
     ctypes.POINTER(ctypes.c_char_p),
 ]
 ch_lib.chain_coords_converter.restype = ctypes.POINTER(ctypes.c_char_p)
+
+# Global variables for worker processes
+_chain_file = None
+_chain_dict = None
+_bed_data = None
+_chain_gene_field = None
+_limit = None
+
+
+def _worker_init(chain_file, bed_data, chain_gene_field, limit):
+    """Initialize each worker process with shared data."""
+    global _chain_file, _chain_dict, _bed_data, _chain_gene_field, _limit
+    
+    # Set environment for this process
+    os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
+    
+    # Store shared data
+    _chain_file = chain_file
+    _bed_data = bed_data
+    _chain_gene_field = chain_gene_field
+    _limit = limit
+    
+    # Load chain dictionary once per worker
+    index_file = chain_file.replace(".chain", ".chain_ID_position")
+    if os.path.isfile(index_file):
+        from toga_modules.common import load_chain_dict
+        _chain_dict = load_chain_dict(index_file)
+    else:
+        _chain_dict = None
+
+    # Load shared library for this worker
+    from toga_modules.common import get_shared_lib_extension
+    location = os.path.dirname(os.path.abspath(__file__))
+    lib_path = os.path.join(
+        location, "..", "util_c", "lib", f"libchain_coords_converter_slib{get_shared_lib_extension()}"
+    )
+    
+    global _ch_lib
+    _ch_lib = ctypes.CDLL(lib_path)
+    _ch_lib.chain_coords_converter.argtypes = [
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.POINTER(ctypes.c_char_p),
+    ]
+    _ch_lib.chain_coords_converter.restype = ctypes.POINTER(ctypes.c_char_p)
 
 
 def extract_chain_fast(chain_file, chain_dict, chain_id):
@@ -312,12 +360,234 @@ def precompute_regions(
 
         del raw_ch_conv_out  # not sure if necessary but...
         iter_num += 1  # verbosity
-        if iter_num % 10_000 == 0:
+        if iter_num % 2500 == 0:
             to_log(f"PROCESSED {iter_num} CHAINS OUT OF {task_size}")
         # eprint(f"Chain {iter_num} / {chains_num}", end="\r")
     to_log(f"{MODULE_NAME_FOR_LOG}: precomputed regions for {len(gene_chain_grange)} transcripts")
     to_log(f"{MODULE_NAME_FOR_LOG}: skipped {len(skipped)} orthologous loci")
     return gene_chain_grange, skipped
+
+
+def _process_single_chain(args):
+    """Process a single chain in worker process."""
+    chain_id, genes = args
+    
+    try:
+        # Use global variables set by worker initialization
+        global _chain_file, _chain_dict, _bed_data, _chain_gene_field, _limit, _ch_lib
+        
+        # extract chain itself - try fast method first, fall back to original if needed
+        chain_body = None
+        if _chain_dict is not None:
+            try:
+                chain_text = extract_chain_fast(_chain_file, _chain_dict, chain_id)
+                if chain_text is not None:
+                    chain_body = chain_text.encode()
+            except Exception:
+                pass  # Fall back to original
+
+        if chain_body is None:
+            # Use original method as fallback
+            bdb_chain_file = _chain_file.replace(".chain", ".bst")
+            chain_body = chain_extract_id(bdb_chain_file, chain_id).encode()
+        
+        all_gene_ranges = []
+        for transcript in genes:
+            # get genomic coordinates for each gene
+            gene_data = _bed_data.get(transcript)
+            if gene_data is None:
+                continue
+            grange = f"{gene_data[0]}:{gene_data[1]}-{gene_data[2]}"
+            all_gene_ranges.append(grange)
+
+        if not all_gene_ranges:
+            return (chain_id, {}, [])
+
+        # we need to get corresponding regions in the query
+        # for now we have chain blocks coordinates and gene
+        # regions in the reference genome
+        # use chain_coords_converter shared library to
+        # convert target -> query coordinates via a chain
+        # first need to convert to C-types
+        c_chain = ctypes.c_char_p(chain_body)
+        c_shift = ctypes.c_int(1)
+        granges_bytes = [s.encode("utf-8") for s in all_gene_ranges]
+        granges_num = len(all_gene_ranges)
+        c_granges_num = ctypes.c_int(granges_num)
+        granges_arr = (ctypes.c_char_p * (granges_num + 1))()
+        granges_arr[:-1] = granges_bytes
+        granges_arr[granges_num] = None
+
+        # then call the function
+        raw_ch_conv_out = _ch_lib.chain_coords_converter(
+            c_chain, c_shift, c_granges_num, granges_arr
+        )
+        chain_coords_conv_out = []  # keep lines here
+        # convert C output to python-readable type
+        for i in range(granges_num + 1):
+            chain_coords_conv_out.append(raw_ch_conv_out[i].decode("utf-8"))
+
+        # Extract strand information from the first line (chain header)
+        chain_header = chain_coords_conv_out[0].rstrip().split()
+        # Header format: "chain tName tStrand tSize tStart tEnd qName qStrand qSize qStart qEnd"
+        reference_strand = chain_header[2]  # tStrand
+        query_strand = chain_header[7]      # qStrand
+
+        gene_chain_grange = {}
+        skipped = []
+        
+        for line in chain_coords_conv_out[1:]:
+            # then parse the output
+            # line contains information about transcript range in the query
+            # and the corresponding locus in the reference
+            line_info = line.rstrip().split()
+            if len(line_info) < 3:
+                continue
+            # line info is: region num, region in reference, region in query
+            # one line per one gene, in the same order
+            num = int(line_info[0])
+            # regions format is chrom:start-end
+            q_chrom = line_info[1].split(":")[0]
+            q_grange = line_info[1].split(":")[1].split("-")
+            q_start, q_end = int(q_grange[0]), int(q_grange[1])
+            que_len = q_end - q_start
+            t_grange = line_info[2].split(":")[1].split("-")
+            t_start, t_end = int(t_grange[0]), int(t_grange[1])
+            tar_len = t_end - t_start
+            len_delta = abs(tar_len - que_len)
+            delta_gene_times = len_delta / tar_len if tar_len > 0 else 0
+            transcript = genes[num]  # shared lib returns data per gene in the same order
+            field = _chain_gene_field.get((chain_id, transcript))
+            # check that corresponding region in the query is not too long
+            # for instance query locus is 50 times longer than the gene
+            # or it's longer than 1M base and also this is a SPAN chain
+            high_rel_len = delta_gene_times > REL_LENGTH_THR
+            high_abs_len = len_delta > ABS_LENGTH_TRH
+            long_loci_field = field == SPAN
+            if (high_rel_len or high_abs_len) and long_loci_field:
+                skipped.append((transcript, chain_id, "too long query locus"))
+                continue
+            # for each chain-gene pair save query region length, coordinates, and strand info
+            # need this for required memory estimation and for orthologous loci table
+            query_region = f"{q_chrom}:{q_start}-{q_end}"
+            gene_chain_grange[transcript] = {
+                "query_length": que_len,
+                "search_locus": query_region,
+                "reference_strand": reference_strand,
+                "query_strand": query_strand
+            }
+
+        del raw_ch_conv_out  # not sure if necessary but...
+        
+        return (chain_id, gene_chain_grange, skipped)
+        
+    except Exception as e:
+        # Can't use to_log here as it might not be available in worker
+        print(f"Error processing chain {chain_id}: {e}")
+        return (chain_id, {}, [(str(genes), chain_id, f"processing error: {e}")])
+
+
+def precompute_regions_parallel(
+    batch, bed_data, bdb_chain_file, chain_gene_field, limit, max_workers=None
+):
+    """Precompute regions for each chain:bed pair using parallel processing."""
+    to_log(f"{MODULE_NAME_FOR_LOG}: precomputing query regions for each transcript/chain pair using parallel processing")
+    to_log(f"{MODULE_NAME_FOR_LOG}: batch size: {len(batch)}")
+    chain_to_genes, skipped = defaultdict(list), []
+
+    # revert the dict, from gene-to-chain to chain-to-genes
+    to_log(f"{MODULE_NAME_FOR_LOG}: first, invert gene-to-chains dict to chain-to-genes")
+    for transcript, chains_not_sorted in batch.items():
+        if len(chains_not_sorted) == 0:
+            to_log(f"* skip transcript {transcript}: no chains to create annotation in the query")
+            skipped.append((transcript, "no orthologous chains"))
+            continue
+
+        chains = sorted(chains_not_sorted, key=lambda x: int(x))
+        chains = chains[:limit]
+
+        if len(chains_not_sorted) > limit:
+            to_log(
+                f"* !!for transcript {transcript} there is "
+                f"{len(chains_not_sorted)} chains to produce the annotation. "
+                f"Only the first {limit} chains will be considered, the remaining "
+                f"chains will be skipped."
+            )
+            # skip genes that have > limit orthologous chains
+            chains_skipped = chains[limit:]
+            skipped.append(
+                (
+                    transcript,
+                    ",".join(chains_skipped),
+                    f"number of chains ({limit} chains) limit exceeded",
+                )
+            )
+
+        for chain_id in chains:
+            chain_to_genes[chain_id].append(transcript)
+
+    chain_file = bdb_chain_file.replace(".bst", ".chain")
+    task_size = len(chain_to_genes)
+    to_log(f"{MODULE_NAME_FOR_LOG}: for each of {task_size} involved chains, precompute regions")
+
+    # Set up parallel processing
+    if max_workers is None:
+        max_workers = min(multiprocessing.cpu_count(), task_size)
+    to_log(f"{MODULE_NAME_FOR_LOG}: using {max_workers} workers for parallel processing")
+
+    # Prepare work items
+    chain_items = list(chain_to_genes.items())
+    
+    # Process all chains in parallel
+    gene_chain_grange = defaultdict(dict)
+    all_skipped = []
+    
+    try:
+        # Use ProcessPoolExecutor with worker initialization
+        with concurrent.futures.ProcessPoolExecutor(
+            max_workers=max_workers,
+            initializer=_worker_init,
+            initargs=(chain_file, bed_data, chain_gene_field, limit)
+        ) as executor:
+            # Submit all jobs
+            futures = [
+                executor.submit(_process_single_chain, (chain_id, genes))
+                for chain_id, genes in chain_items
+            ]
+            
+            # Collect results as they complete
+            completed = 0
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    chain_id, chain_gene_data, chain_skipped = future.result()
+                    
+                    # Merge results for this chain
+                    for transcript, data in chain_gene_data.items():
+                        gene_chain_grange[transcript][chain_id] = data
+                    
+                    # Collect skipped entries
+                    all_skipped.extend(chain_skipped)
+                    
+                    completed += 1
+                    
+                    if completed % 2500 == 0:  # Log progress every 2500 chains
+                        to_log(f"{MODULE_NAME_FOR_LOG}: PROCESSED {completed} CHAINS OUT OF {task_size}")
+                        
+                except Exception as exc:
+                    to_log(f"{MODULE_NAME_FOR_LOG}: Chain processing failed with exception: {exc}")
+            
+            to_log(f"{MODULE_NAME_FOR_LOG}: completed all {task_size} chains")
+    
+    except KeyboardInterrupt:
+        to_log(f"{MODULE_NAME_FOR_LOG}: parallel processing interrupted by user")
+        raise
+
+    # Combine original skipped with processing skipped
+    all_skipped = skipped + all_skipped
+    
+    to_log(f"{MODULE_NAME_FOR_LOG}: precomputed regions for {len(gene_chain_grange)} transcripts")
+    to_log(f"{MODULE_NAME_FOR_LOG}: skipped {len(all_skipped)} orthologous loci")
+    return gene_chain_grange, all_skipped
 
 
 def read_fragments_data(in_file):
@@ -351,7 +621,9 @@ def create_orthologous_loci_table(
     annotate_paralogs=False,
     fragments_data=None,
     log_file=None,
-    quiet=False
+    quiet=False,
+    max_workers=None,
+    use_parallel=True
 ):
     """Create orthologous loci table with direct arguments.
     
@@ -370,6 +642,8 @@ def create_orthologous_loci_table(
         fragments_data: Gene: fragments file for fragmented genomes
         log_file: Log file
         quiet: Don't print to console
+        max_workers: Maximum number of workers for parallel processing
+        use_parallel: Use parallel processing for precomputing regions
     """
     t0 = dt.now()
     setup_logger(log_file, write_to_console=not quiet)
@@ -388,6 +662,8 @@ def create_orthologous_loci_table(
     to_log(f"* o2o_only: {o2o_only}")
     to_log(f"* annotate_paralogs: {annotate_paralogs}")
     to_log(f"* fragments_data: {fragments_data}")
+    to_log(f"* use_parallel: {use_parallel}")
+    to_log(f"* max_workers: {max_workers}")
 
     # get lists of orthologous chains per each gene
     batch, chain_gene_field, skipped_1, m_ = read_orthologs(
@@ -404,13 +680,23 @@ def create_orthologous_loci_table(
         gene_fragments_dict = dict()
 
     # pre-compute chain : gene : region data - this is the main functionality now
-    regions, skipped_2 = precompute_regions(
-        batch,
-        bed_data,
-        bdb_chain_file,
-        chain_gene_field,
-        chains_limit,
-    )
+    if use_parallel:
+        regions, skipped_2 = precompute_regions_parallel(
+            batch,
+            bed_data,
+            bdb_chain_file,
+            chain_gene_field,
+            chains_limit,
+            max_workers,
+        )
+    else:
+        regions, skipped_2 = precompute_regions(
+            batch,
+            bed_data,
+            bdb_chain_file,
+            chain_gene_field,
+            chains_limit,
+        )
 
     # Create orthologous loci table directly from precomputed regions
     orthologous_loci = []

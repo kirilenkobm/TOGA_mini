@@ -56,7 +56,7 @@ def prepare_bed_file(bed_file, output, save_rejected=None, only_chrom=None):
             f.close()  # this is for sure an error
             # it is possible only if something except a bed12 was provided
             die(
-                "Error! Bed 12 file is required! Got a file with {len(line_data)} fields instead"
+                f"Error! Bed 12 file is required! Got a file with {len(line_data)} fields instead"
             )
 
         chrom = line_data[0]

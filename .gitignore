@@ -10,4 +10,8 @@ chain_class_models/*.dat
 toga_modules/__pycache__/
 __pycache__/
 
-input_files
+
+
+# different outputs and inputs
+input_files/
+hg38_vs_mm39_comprehensive/

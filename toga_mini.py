@@ -160,6 +160,7 @@ class Toga:
         self.orthologous_chain_limit = args.orthologous_chain_limit
         self.o2o_only = args.o2o_only
         self.ld_model_arg = args.ld_model
+        self.use_parallel_loci = not args.disable_parallel_loci
 
         self.fragmented_genome = False if args.disable_fragments_joining else True
         self.orthology_score_threshold = args.orthology_score_threshold
@@ -512,7 +513,9 @@ class Toga:
             o2o_only=self.o2o_only,
             fragments_data=fragmented_dict_file,
             log_file=self.log_file,
-            quiet=self.quiet
+            quiet=self.quiet,
+            max_workers=self.max_workers,
+            use_parallel=self.use_parallel_loci
         )
 
     @staticmethod
@@ -642,6 +645,13 @@ def parse_args(arg_strs: list[str] = None):
         dest="ld_model",
         action="store_true",
         help="Apply extra classifier for molecular distances ~1sps.",
+    )
+    app.add_argument(
+        "--disable_parallel_loci",
+        "--dpl",
+        dest="disable_parallel_loci",
+        action="store_true",
+        help="Disable parallel processing for orthologous loci table creation",
     )
     app.add_argument(
         "--cluster_queue_name",
