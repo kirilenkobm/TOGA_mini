@@ -149,7 +149,6 @@ class Toga:
         # mics things
         self.isoforms_arg = args.isoforms if args.isoforms else None
         self.isoforms = None  # will be assigned after a completeness check
-        self.chain_jobs = args.chain_jobs_num
         self.time_log = args.time_marks
         self.rejected_log = os.path.join(self.wd, "genes_rejection_reason.tsv")
         self.keep_temp = True if args.keep_temp else False
@@ -590,17 +589,6 @@ def parse_args(arg_strs: list[str] = None):
         help=(
             "Maximum number of workers for parallel processing. "
             "Default is 10."
-        )
-    )
-    # chain features related
-    app.add_argument(
-        "--chain_jobs_num",
-        "--chn",
-        type=int,
-        default=100,
-        help=(
-            "Number of cluster jobs for extracting chain features. "
-            "Recommended from 150 to 200 jobs."
         )
     )
     app.add_argument(
