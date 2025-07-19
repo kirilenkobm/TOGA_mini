@@ -148,7 +148,6 @@ class Toga:
         # mics things
         self.isoforms_arg = args.isoforms if args.isoforms else None
         self.isoforms = None  # will be assigned after a completeness check
-        self.time_log = args.time_marks
         self.rejected_log = os.path.join(self.wd, "genes_rejection_reason.tsv")
 
         # define to call CESAR or not to call
@@ -599,12 +598,6 @@ def parse_args(arg_strs: list[str] = None):
             "Skip genes that have more that ORTHOLOGOUS_CHAIN_LIMIT orthologous "
             "chains. Recommended values are a 50-100."
         )
-    )
-    app.add_argument(
-        "--time_marks",
-        "-t",
-        default=None,
-        help="File to save timings of different steps.",
     )
     app.add_argument(
         "--o2o_only",
