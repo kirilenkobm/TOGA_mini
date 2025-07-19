@@ -67,7 +67,6 @@ class Toga:
         # check if all files TOGA needs are here
         self.temp_files = []  # remove at the end, list of temp files
         to_log("#### Initiating TOGA class ####")
-        self.cluster_queue_name = args.cluster_queue_name
         self.max_workers = args.max_workers
 
         self.toga_exe_path = os.path.dirname(__file__)
@@ -652,17 +651,6 @@ def parse_args(arg_strs: list[str] = None):
         dest="disable_parallel_loci",
         action="store_true",
         help="Disable parallel processing for orthologous loci table creation",
-    )
-    app.add_argument(
-        "--cluster_queue_name",
-        "--cqn",
-        default="batch",
-        help=(
-            "Specify cluster partition/queue, default batch. "
-            "Another popular option is 'long'. Please consult "
-            "with your system administrator to figure out which "
-            "parameter is the most suitable for your HPC system."
-        )
     )
     # print help if there are no args
     if not arg_strs and len(sys.argv) < 2:
