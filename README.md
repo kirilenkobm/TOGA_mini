@@ -25,14 +25,13 @@ conda env create -f environment.yaml
 ## 📂 Usage
 
 ```
-toga_mini.py [-h] chain_file transcript_file isoforms_file target_2bit query_2bit out_orthologous_regions_mapping out_classification_table
+usage: toga_mini.py [-h] chain_file transcript_file isoforms_file reference_chrom_sizes out_orthologous_regions_mapping out_classification_table
 
 positional arguments:
   chain_file            Path to genome alignment file in chain format
   transcript_file       Path to transcripts bed12 file
   isoforms_file         Isoforms mapping
-  target_2bit           Path to reference 2bit file
-  query_2bit            Path to query 2bit file
+  reference_chrom_sizes Path to reference chromosome sizes file (tab-separated: chrom_name	size)
   out_orthologous_regions_mapping
                         Output with orthologous regions
   out_classification_table

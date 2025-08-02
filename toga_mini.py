@@ -21,21 +21,18 @@ from pyrion.ops import project_intervals_through_chain
 from pyrion.core.intervals import AnnotatedIntervalSet
 from pyrion.core.intervals import RegionType
 
-from pyrion import read_chain_file
-from pyrion import read_bed12_file
-from pyrion import read_gene_transcript_mapping
-from pyrion import TwoBitAccessor
+from pyrion import read_chain_file, read_gene_data, read_bed12_file
 from typing import Tuple
 
 ORTH = "ORTH"
 PARA = "PARA"
 SPAN = "SPAN"
-P_PGENES = "P_PGENES"
+PROCESSED_PSEUDOGENES = "P_PGENES"
 SPANNING_SCORE = -1.0
-PPGENE_SCORE = -2.0
+PROCESSED_PSEUDOGENE_SCORE = -2.0
 
-SE_MODEL = "dev/se_model.dat"
-ME_MODEL = "dev/me_model.dat"
+SE_MODEL = "chain_class_models/se_model.dat"
+ME_MODEL = "chain_class_models/me_model.dat"
 SE_MODEL_FEATURES = ["gl_exo", "flank_cov", "exon_perc", "synt_log"]
 ME_MODEL_FEATURES = ["gl_exo", "loc_exo", "flank_cov", "synt_log", "intr_perc"]
 
@@ -67,7 +64,7 @@ def write_orthologous_regions(pairs_to_q_intervals, chains, transcripts, output_
     for (t_id, c_id), (start, end) in pairs_to_q_intervals.items():
         transcript_obj = transcripts.get_by_id(t_id)
         chain_obj = chains.get_by_chain_id(c_id)
-        q_chrom = chain_obj.q_chrom_name
+        q_chrom = chain_obj.q_chrom
 
         transcript_strand = transcript_obj.strand
         chain_q_strand = chain_obj.q_strand
@@ -78,7 +75,6 @@ def write_orthologous_regions(pairs_to_q_intervals, chains, transcripts, output_
 
 
 def map_orthologs(ortholog_map, chains, transcripts):
-    task_size = len(ortholog_map)
     pairs_to_q_intervals = {}
 
     for num, (chain_id, transcript_ids) in enumerate(ortholog_map.items()):
@@ -100,15 +96,12 @@ def classify_table(df: pd.DataFrame, annot_threshold: float = 0.5) -> pd.DataFra
     df["single_exon"] = (df["ex_num"] == 1).astype(int)
     df = df.fillna(0.0)
 
-    # spanning chains
     df["pred"] = np.nan
     df.loc[(df["exon_perc"] == 0) & (df["synteny"] > 1), "pred"] = SPANNING_SCORE
 
-    # load models
     se_model = joblib.load(SE_MODEL)
     me_model = joblib.load(ME_MODEL)
 
-    # apply
     se_mask = (df["pred"].isna()) & (df["single_exon"] == 1)
     me_mask = (df["pred"].isna()) & (df["single_exon"] == 0)
 
@@ -118,7 +111,6 @@ def classify_table(df: pd.DataFrame, annot_threshold: float = 0.5) -> pd.DataFra
     if me_mask.any():
         df.loc[me_mask, "pred"] = me_model.predict_proba(df.loc[me_mask, ME_MODEL_FEATURES])[:, 1]
 
-    # pseudogene rule
     pp_mask = (
         (df["single_exon"] == 0)
         & (df["synteny"] == 1)
@@ -126,14 +118,14 @@ def classify_table(df: pd.DataFrame, annot_threshold: float = 0.5) -> pd.DataFra
         & (df["pred"] < annot_threshold)
         & (df["exon_perc"] > 0.65)
     )
-    df.loc[pp_mask, "pred"] = PPGENE_SCORE
+    df.loc[pp_mask, "pred"] = PROCESSED_PSEUDOGENE_SCORE
 
-    # label
+
     def assign_label(pred):
         if pred == SPANNING_SCORE:
             return SPAN
-        elif pred == PPGENE_SCORE:
-            return P_PGENES
+        elif pred == PROCESSED_PSEUDOGENE_SCORE:
+            return PROCESSED_PSEUDOGENES
         elif pred < annot_threshold:
             return PARA
         else:
@@ -146,7 +138,6 @@ def classify_table(df: pd.DataFrame, annot_threshold: float = 0.5) -> pd.DataFra
 def extract_features(all_chain_ids, chain_to_ts_intersection, chains, transcripts, reference_chrom_sizes,
                      giant_chains_transripts_mapping, split_giant_chains_by_id):
     features = []
-    task_size = len(all_chain_ids)
 
     for num, chain_ids_tup in enumerate(all_chain_ids):
 
@@ -188,10 +179,7 @@ def extract_features(all_chain_ids, chain_to_ts_intersection, chains, transcript
             region_types = region_data.region_types
             intervals = region_data.intervals
 
-            # region lengths
             cds_len, utr_len, flank_len, gene_len, exon_len = compute_region_lengths(region_data)
-
-            # find overlaps
             local_overlaps = find_intersections(intervals, chain_blocks_ndarr, region_types)
 
             overlap_sums = defaultdict(int)
@@ -208,10 +196,9 @@ def extract_features(all_chain_ids, chain_to_ts_intersection, chains, transcript
                 overlap_sums[key] += sum(overlap_len for _, overlap_len in overlaps)
 
             total_cds_overlap = overlap_sums[RegionType.CDS]
-            total_flank_overlap = overlap_sums[RegionType.FLANK_LEFT]  # total of both flanks
+            total_flank_overlap = overlap_sums[RegionType.FLANK_LEFT]
             total_gene_overlap = overlap_sums[RegionType.GENE_SPAN]
 
-            # features
             local_exo = total_cds_overlap / total_gene_overlap if total_gene_overlap > 0 else 0
             flank_feature = total_flank_overlap / flank_len if flank_len > 0 else 0
             exon_perc = total_cds_overlap / exon_len if exon_len > 0 else 0
@@ -221,8 +208,8 @@ def extract_features(all_chain_ids, chain_to_ts_intersection, chains, transcript
             intr_perc = intron_covered / intron_len if intron_len > 0 else 0
 
             features.append((
-                chain_ids_tup[0],  # chain_id
-                t.id,  # transcript_id
+                chain_ids_tup[0],
+                t.id,
                 global_exo,
                 exlen_to_qlen,
                 synteny,
@@ -230,11 +217,12 @@ def extract_features(all_chain_ids, chain_to_ts_intersection, chains, transcript
                 flank_feature,
                 exon_perc,
                 intr_perc,
-                len(t.blocks),  # ex_num
-                chain.q_length(),  # chain_qlen
-                exon_len,  # from compute_region_lengths()
-                gene_len,  # from compute_region_lengths()
+                len(t.blocks),
+                chain.q_length(),
+                exon_len,
+                gene_len,
             ))
+
     return features
 
 
@@ -263,7 +251,6 @@ def split_giant_chains(chain_to_ts_intersection, chains, transcripts):
     return all_chain_ids, giant_chain_mapping, split_giant_chains_by_id
 
 
-
 def intersect_chains_and_transcripts(chains, transcripts, reference_chromosomes, chain_t_chromosomes):
     chain_to_ts_intersection = defaultdict(list)
     for chrom in set(reference_chromosomes) & set(chain_t_chromosomes):
@@ -281,13 +268,27 @@ def intersect_chains_and_transcripts(chains, transcripts, reference_chromosomes,
 
     return chain_to_ts_intersection
 
+
+def read_chrom_sizes(file_path: str) -> dict:
+    chrom_sizes = {}
+    with open(file_path, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('#'):
+                parts = line.split('\t')
+                if len(parts) >= 2:
+                    chrom_name = parts[0]
+                    size = int(parts[1])
+                    chrom_sizes[chrom_name] = size
+    return chrom_sizes
+
+
 def parse_args():
     app = argparse.ArgumentParser()
     app.add_argument("chain_file", help="Path to genome alignment file in chain format")
     app.add_argument("transcript_file", help="Path to transcripts bed12 file")
     app.add_argument("isoforms_file", help="Isoforms mapping")
-    app.add_argument("target_2bit", help="Path to reference 2bit file")
-    app.add_argument("query_2bit", help="Path to query 2bit file")
+    app.add_argument("reference_chrom_sizes", help="Path to reference chromosome sizes file (tab-separated: chrom_name\tsize)")
     app.add_argument("out_orthologous_regions_mapping", help="Output with orthologous regions")
     app.add_argument("out_classification_table", help="Classification table with predictions")
 
@@ -308,15 +309,12 @@ def main():
     print(f"{t0}: Reading input files...")
     chains = read_chain_file(args.chain_file, 25_000)
     transcripts = read_bed12_file(args.transcript_file)
-    isoforms = read_gene_transcript_mapping(args.isoforms_file)
-    transcripts.bind_gene_mapping(isoforms)
-
-    reference_2bit_accessor = TwoBitAccessor(args.target_2bit)
-    query_2bit_accessor = TwoBitAccessor(args.query_2bit)
+    gene_data = read_gene_data(args.isoforms_file, gene_column=1, transcript_id_column=2)
+    transcripts.bind_gene_data(gene_data)
 
     reference_chromosomes = transcripts.get_all_chromosomes()
-    reference_chrom_sizes = reference_2bit_accessor.chrom_sizes()
-    # query_chrom_size = query_2bit_accessor.chrom_sizes()
+    reference_chrom_sizes = read_chrom_sizes(args.reference_chrom_sizes)
+
     chain_t_chromosomes = chains.get_reference_chromosomes()
     print(f"{_time_delta(t0)}: Input files read.")
 

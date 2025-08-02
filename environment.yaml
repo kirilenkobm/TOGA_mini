@@ -6,11 +6,9 @@ dependencies:
   - python=3.12
   - numpy
   - pandas
-  - jupyterlab
   - xgboost
   - scikit-learn
   - joblib
-  - h5py
   - pip
   - pip:
-      - twobitreader
+      - pyrion
