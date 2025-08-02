@@ -1,5 +1,2 @@
 #!/usr/bin/env bash
-# TODO: proper testing suite
-rm -rf hg38_vs_mm39_lncRNA_toga
-
-./toga_mini.py ../CURIA/datum/hg38.mm39.allfilled.chain ../CURIA/toga_input/hg38.lncRNA.bed ../CURIA/datum/hg38.2bit ../CURIA/datum/mm39.2bit -i ../CURIA/toga_input/hg38.isoforms.tsv --project_dir hg38_vs_mm39_lncRNA_toga
+./toga_mini.py test_input/hg38.chr21.mm39.chr16.chain test_input/hg38.comprehensive.bed test_input/hg38.chr21.isoforms.tsv test_input/example_chrom_sizes.tsv test_output/test_regions_mapping.tsv test_output/test_classification_table.tsv
