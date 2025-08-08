@@ -15,6 +15,10 @@ Unlike full TOGA, TOGA-mini focuses solely on predicting orthologous loci for an
 - Suitable for rapid screening or as input for custom post-processing pipelines.
 - Slimmed-down, standalone tool.
 
+## TODO
+
+- Isoforms graph.
+
 ## 📦 Installation
 
 ```bash

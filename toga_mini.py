@@ -145,6 +145,10 @@ def classify_table(df: pd.DataFrame, annot_threshold: float = 0.5) -> pd.DataFra
 def extract_features(all_chain_ids, chain_to_ts_intersection, chains, transcripts, reference_chrom_sizes,
                      giant_chains_transripts_mapping, split_giant_chains_by_id):
     features = []
+    total_units = len(all_chain_ids)
+    # Progress reporting every ~5%
+    progress_step = max(1, total_units // 20) if total_units > 0 else 1
+    last_reported_percent = -1
 
     for num, chain_ids_tup in enumerate(all_chain_ids):
 
@@ -229,6 +233,14 @@ def extract_features(all_chain_ids, chain_to_ts_intersection, chains, transcript
                 exon_len,
                 gene_len,
             ))
+
+        # Emit progress every ~5%
+        if ((num + 1) % progress_step == 0) or (num + 1 == total_units):
+            percent_complete = int(((num + 1) * 100) / total_units) if total_units > 0 else 100
+            percent_complete = (percent_complete // 5) * 5  # snap to 5% increments
+            if percent_complete != last_reported_percent:
+                print(f"Feature extraction progress: {percent_complete}% ({num + 1}/{total_units} units)")
+                last_reported_percent = percent_complete
 
     return features
 
