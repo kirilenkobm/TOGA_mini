@@ -4,6 +4,7 @@ import sys
 from collections import defaultdict
 from datetime import datetime as dt
 import argparse
+import os
 
 import joblib
 import pandas as pd
@@ -40,6 +41,12 @@ FEATURE_COLUMNS = (
     "chain_id", "transcript_id", "gl_exo","exlen_to_qlen","synteny","loc_exo","flank_cov",
     "exon_perc", "intr_perc", "ex_num", "chain_qlen","exon_len", "gene_span_len",
 )
+
+
+def ensure_parent_directory(file_path: str) -> None:
+    """Ensure the parent directory for a file path exists."""
+    directory_path = os.path.dirname(file_path) or "."
+    os.makedirs(directory_path, exist_ok=True)
 
 
 def compute_region_lengths(region_set: AnnotatedIntervalSet) -> Tuple[int, int, int, int, int]:
@@ -305,26 +312,41 @@ def _time_delta(t0: dt):
 
 def main():
     args = parse_args()
+    # Ensure output directories exist
+    ensure_parent_directory(args.out_orthologous_regions_mapping)
+    ensure_parent_directory(args.out_classification_table)
     t0 = dt.now()
     print(f"{t0}: Reading input files...")
     chains = read_chain_file(args.chain_file, 25_000)
+    print("# Chains: len(chains) = ", len(chains))
     transcripts = read_bed12_file(args.transcript_file)
     gene_data = read_gene_data(args.isoforms_file, gene_column=1, transcript_id_column=2)
     transcripts.bind_gene_data(gene_data)
+    print("# Reference transcripts: len(transcripts) = ", len(transcripts))
 
     reference_chromosomes = transcripts.get_all_chromosomes()
+    print("# reference chromosomes: ", len(reference_chromosomes), " =")
     reference_chrom_sizes = read_chrom_sizes(args.reference_chrom_sizes)
 
     chain_t_chromosomes = chains.get_reference_chromosomes()
     print(f"{_time_delta(t0)}: Input files read.")
 
-    print(f"{_time_delta(t0)}: Intersecting chains and transcripts...")
+    # Detailed logging for intersection sizes
+    shared_chromosomes = set(reference_chromosomes) & set(chain_t_chromosomes)
+    num_chains_shared = sum(len(chains.get_by_target_chrom(chrom)) for chrom in shared_chromosomes if chains.get_by_target_chrom(chrom))
+    num_transcripts_shared = sum(len(transcripts.get_by_chrom(chrom)) for chrom in shared_chromosomes if transcripts.get_by_chrom(chrom))
+    print(f"{_time_delta(t0)}: Intersecting {num_transcripts_shared} transcripts vs {num_chains_shared} chains across {len(shared_chromosomes)} chromosomes...")
+
     chain_to_ts_intersection = intersect_chains_and_transcripts(chains, transcripts, reference_chromosomes, chain_t_chromosomes)
-    print(f"{_time_delta(t0)}: Chains and transcripts intersected.")
+    total_intersections = sum(len(v) for v in chain_to_ts_intersection.values())
+    print(f"{_time_delta(t0)}: Intersected {total_intersections} chain–transcript pairs.")
 
     print(f"{_time_delta(t0)}: Splitting giant chains...")
     all_chain_ids, giant_chains_transcripts_mapping, split_giant_chains_by_id = split_giant_chains(chain_to_ts_intersection, chains, transcripts)
-    print(f"{_time_delta(t0)}: Giant chains split.")
+    num_units_total = len(all_chain_ids)
+    num_units_split = sum(1 for cid in all_chain_ids if cid[1] != -1)
+    num_units_normal = num_units_total - num_units_split
+    print(f"{_time_delta(t0)}: Giant chains split. Units: {num_units_total} (split: {num_units_split}, normal: {num_units_normal}).")
 
     print(f"{_time_delta(t0)}: Extracting features...")
     features = extract_features(all_chain_ids, chain_to_ts_intersection, chains, transcripts, reference_chrom_sizes, giant_chains_transcripts_mapping, split_giant_chains_by_id)
