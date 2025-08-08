@@ -1,5 +1,5 @@
-#! /usr/bin/env python3
-"""Recapitulate the Toga mini demo."""
+#!/usr/bin/env python3
+"""TOGA-mini pipeline."""
 import sys
 from collections import defaultdict
 from datetime import datetime as dt
@@ -29,11 +29,14 @@ ORTH = "ORTH"
 PARA = "PARA"
 SPAN = "SPAN"
 PROCESSED_PSEUDOGENES = "P_PGENES"
+
+ORTHOLOGY_THRESHOLD = 0.5
 SPANNING_SCORE = -1.0
 PROCESSED_PSEUDOGENE_SCORE = -2.0
 
-SE_MODEL = "chain_class_models/se_model.dat"
-ME_MODEL = "chain_class_models/me_model.dat"
+SCRIPT_LOCATION = os.path.dirname(__file__)
+SE_MODEL_PATH = os.path.join(SCRIPT_LOCATION, "chain_classification_models", "se_model.dat")
+ME_MODEL_PATH = os.path.join(SCRIPT_LOCATION, "chain_classification_models", "me_model.dat")
 SE_MODEL_FEATURES = ["gl_exo", "flank_cov", "exon_perc", "synt_log"]
 ME_MODEL_FEATURES = ["gl_exo", "loc_exo", "flank_cov", "synt_log", "intr_perc"]
 
@@ -96,7 +99,18 @@ def map_orthologs(ortholog_map, chains, transcripts):
     return pairs_to_q_intervals
 
 
-def classify_table(df: pd.DataFrame, annot_threshold: float = 0.5) -> pd.DataFrame:
+def assign_label(pred):
+    if pred == SPANNING_SCORE:
+        return SPAN
+    elif pred == PROCESSED_PSEUDOGENE_SCORE:
+        return PROCESSED_PSEUDOGENES
+    elif pred < ORTHOLOGY_THRESHOLD:
+        return PARA
+    else:
+        return ORTH
+
+
+def classify_table(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df["synt_log"] = np.log10(df["synteny"].replace(0, np.nan))
     df["intr_perc"] = df["intr_perc"].fillna(0.0)  # already computed
@@ -106,8 +120,8 @@ def classify_table(df: pd.DataFrame, annot_threshold: float = 0.5) -> pd.DataFra
     df["pred"] = np.nan
     df.loc[(df["exon_perc"] == 0) & (df["synteny"] > 1), "pred"] = SPANNING_SCORE
 
-    se_model = joblib.load(SE_MODEL)
-    me_model = joblib.load(ME_MODEL)
+    se_model = joblib.load(SE_MODEL_PATH)
+    me_model = joblib.load(ME_MODEL_PATH)
 
     se_mask = (df["pred"].isna()) & (df["single_exon"] == 1)
     me_mask = (df["pred"].isna()) & (df["single_exon"] == 0)
@@ -118,46 +132,34 @@ def classify_table(df: pd.DataFrame, annot_threshold: float = 0.5) -> pd.DataFra
     if me_mask.any():
         df.loc[me_mask, "pred"] = me_model.predict_proba(df.loc[me_mask, ME_MODEL_FEATURES])[:, 1]
 
-    pp_mask = (
+    processed_pseudogenes_mask = (
         (df["single_exon"] == 0)
         & (df["synteny"] == 1)
         & (df["exlen_to_qlen"] > 0.95)
-        & (df["pred"] < annot_threshold)
+        & (df["pred"] < ORTHOLOGY_THRESHOLD)
         & (df["exon_perc"] > 0.65)
     )
-    df.loc[pp_mask, "pred"] = PROCESSED_PSEUDOGENE_SCORE
 
-
-    def assign_label(pred):
-        if pred == SPANNING_SCORE:
-            return SPAN
-        elif pred == PROCESSED_PSEUDOGENE_SCORE:
-            return PROCESSED_PSEUDOGENES
-        elif pred < annot_threshold:
-            return PARA
-        else:
-            return ORTH
-
+    df.loc[processed_pseudogenes_mask, "pred"] = PROCESSED_PSEUDOGENE_SCORE
     df["label"] = df["pred"].apply(assign_label)
     return df
 
 
 def extract_features(all_chain_ids, chain_to_ts_intersection, chains, transcripts, reference_chrom_sizes,
-                     giant_chains_transripts_mapping, split_giant_chains_by_id):
+                     giant_chains_transcripts_mapping, split_giant_chains_by_id):
     features = []
     total_units = len(all_chain_ids)
-    # Progress reporting every ~5%
     progress_step = max(1, total_units // 20) if total_units > 0 else 1
-    last_reported_percent = -1
 
     for num, chain_ids_tup in enumerate(all_chain_ids):
-
+        if num % progress_step == 0:
+            print(f"extract_features: processing unit {num}/{total_units}...")
         if chain_ids_tup[1] == -1:
             transcript_ov_data = chain_to_ts_intersection[chain_ids_tup[0]]
             chain = chains.get_by_chain_id(chain_ids_tup[0])
             intersected_transcripts = [transcripts.get_by_id(str(t)) for t, _ in transcript_ov_data]
         else:
-            intersected_transcript_ids = giant_chains_transripts_mapping[chain_ids_tup]
+            intersected_transcript_ids = giant_chains_transcripts_mapping[chain_ids_tup]
             intersected_transcripts = [transcripts.get_by_id(str(t)) for t in intersected_transcript_ids]
             chain = split_giant_chains_by_id[chain_ids_tup]
 
@@ -169,11 +171,10 @@ def extract_features(all_chain_ids, chain_to_ts_intersection, chains, transcript
             continue
 
         exon_intervals = merge_transcript_intervals(intersected_transcripts)
-        exon_intervals_ndarr = intervals_to_array(exon_intervals)
+        exon_intervals_np_array = intervals_to_array(exon_intervals)
+        chain_blocks_np_array = chain.blocks_in_target()
 
-        chain_blocks_ndarr = chain.blocks_in_target()
-
-        intersect_all_exons_all_chain_blocks = find_intersections(exon_intervals_ndarr, chain_blocks_ndarr)
+        intersect_all_exons_all_chain_blocks = find_intersections(exon_intervals_np_array, chain_blocks_np_array)
         overlapped_exon_bases = sum(
             np.fromiter((overlap for pairs in intersect_all_exons_all_chain_blocks.values() for _, overlap in pairs),
                         dtype=int)
@@ -183,7 +184,7 @@ def extract_features(all_chain_ids, chain_to_ts_intersection, chains, transcript
         if global_exo > 0.95:
             continue
 
-        exlen_to_qlen = overlapped_exon_bases / chain_q_len if chain_q_len > 0 else 0
+        exon_length_to_query_length = overlapped_exon_bases / chain_q_len if chain_q_len > 0 else 0
 
         for t in intersected_transcripts:
             region_data = t.get_annotated_regions(chrom_sizes=reference_chrom_sizes, flank_size=10000)
@@ -191,7 +192,7 @@ def extract_features(all_chain_ids, chain_to_ts_intersection, chains, transcript
             intervals = region_data.intervals
 
             cds_len, utr_len, flank_len, gene_len, exon_len = compute_region_lengths(region_data)
-            local_overlaps = find_intersections(intervals, chain_blocks_ndarr, region_types)
+            local_overlaps = find_intersections(intervals, chain_blocks_np_array, region_types)
 
             overlap_sums = defaultdict(int)
 
@@ -216,31 +217,23 @@ def extract_features(all_chain_ids, chain_to_ts_intersection, chains, transcript
 
             intron_len = gene_len - exon_len
             intron_covered = total_gene_overlap - total_cds_overlap
-            intr_perc = intron_covered / intron_len if intron_len > 0 else 0
+            intron_coverage_percentage = intron_covered / intron_len if intron_len > 0 else 0
 
             features.append((
                 chain_ids_tup[0],
                 t.id,
                 global_exo,
-                exlen_to_qlen,
+                exon_length_to_query_length,
                 synteny,
                 local_exo,
                 flank_feature,
                 exon_perc,
-                intr_perc,
+                intron_coverage_percentage,
                 len(t.blocks),
                 chain.q_length(),
                 exon_len,
                 gene_len,
             ))
-
-        # Emit progress every ~5%
-        if ((num + 1) % progress_step == 0) or (num + 1 == total_units):
-            percent_complete = int(((num + 1) * 100) / total_units) if total_units > 0 else 100
-            percent_complete = (percent_complete // 5) * 5  # snap to 5% increments
-            if percent_complete != last_reported_percent:
-                print(f"Feature extraction progress: {percent_complete}% ({num + 1}/{total_units} units)")
-                last_reported_percent = percent_complete
 
     return features
 
@@ -289,16 +282,10 @@ def intersect_chains_and_transcripts(chains, transcripts, reference_chromosomes,
 
 
 def read_chrom_sizes(file_path: str) -> dict:
-    chrom_sizes = {}
-    with open(file_path, 'r') as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith('#'):
-                parts = line.split('\t')
-                if len(parts) >= 2:
-                    chrom_name = parts[0]
-                    size = int(parts[1])
-                    chrom_sizes[chrom_name] = size
+    f = open(file_path, "r")
+    lines_parts = [x.split("\t") for x in f.readlines() if x and not x.startswith("#")]
+    f.close()
+    chrom_sizes = {x[0]: int(x[1]) for x in lines_parts}
     return chrom_sizes
 
 
@@ -324,26 +311,30 @@ def _time_delta(t0: dt):
 
 def main():
     args = parse_args()
-    # Ensure output directories exist
+
     ensure_parent_directory(args.out_orthologous_regions_mapping)
     ensure_parent_directory(args.out_classification_table)
+
+    if not os.path.isfile(SE_MODEL_PATH) or not os.path.isfile(ME_MODEL_PATH):
+        print("Error: models not found. Train them with configure.sh script.")
+        sys.exit(1)
+
     t0 = dt.now()
     print(f"{t0}: Reading input files...")
     chains = read_chain_file(args.chain_file, 25_000)
-    print("# Chains: len(chains) = ", len(chains))
+    print(f"Parsed: {len(chains)} from {args.chain_file} in {_time_delta(t0)}")
     transcripts = read_bed12_file(args.transcript_file)
     gene_data = read_gene_data(args.isoforms_file, gene_column=1, transcript_id_column=2)
     transcripts.bind_gene_data(gene_data)
-    print("# Reference transcripts: len(transcripts) = ", len(transcripts))
+    print(f"Parsed {len(transcripts)} transcripts from {args.transcript_file} in {_time_delta(t0)}")
 
     reference_chromosomes = transcripts.get_all_chromosomes()
-    print("# reference chromosomes: ", len(reference_chromosomes), " =")
     reference_chrom_sizes = read_chrom_sizes(args.reference_chrom_sizes)
+    print(f" Found lengths for {len(reference_chromosomes)} reference chromosomes")
 
     chain_t_chromosomes = chains.get_reference_chromosomes()
     print(f"{_time_delta(t0)}: Input files read.")
 
-    # Detailed logging for intersection sizes
     shared_chromosomes = set(reference_chromosomes) & set(chain_t_chromosomes)
     num_chains_shared = sum(len(chains.get_by_target_chrom(chrom)) for chrom in shared_chromosomes if chains.get_by_target_chrom(chrom))
     num_transcripts_shared = sum(len(transcripts.get_by_chrom(chrom)) for chrom in shared_chromosomes if transcripts.get_by_chrom(chrom))

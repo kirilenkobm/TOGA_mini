@@ -6,11 +6,9 @@ hg38_vs_mm39_lncRNA_toga/
 util_c/bin/
 util_c/lib
 
-chain_class_models/*.dat
+*.dat
 toga_modules/__pycache__/
 __pycache__/
-
-
 
 # different outputs and inputs
 input_files/
