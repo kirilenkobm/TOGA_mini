@@ -14,4 +14,5 @@ __pycache__/
 
 # different outputs and inputs
 input_files/
-hg38_vs_mm39_comprehensive/
+hg38*
+commands.sh
