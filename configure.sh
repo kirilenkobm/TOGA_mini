@@ -36,7 +36,7 @@ except ImportError as e:
 # Train models
 echo ""
 echo "🧠 Training classification models..."
-if [ -f "chain_class_models/train_toga_chain_class_model.py" ]; then
+if [ -f "chain_classification_models/train_toga_chain_class_model.py" ]; then
     cd chain_classification_models
     python train_toga_chain_class_model.py
     cd ..
