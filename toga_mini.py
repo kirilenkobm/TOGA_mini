@@ -293,7 +293,10 @@ def parse_args():
     app = argparse.ArgumentParser()
     app.add_argument("chain_file", help="Path to genome alignment file in chain format")
     app.add_argument("transcript_file", help="Path to transcripts bed12 file")
-    app.add_argument("isoforms_file", help="Isoforms mapping")
+    app.add_argument(
+        "isoforms_file",
+        help="Isoforms mapping TSV with columns: gene_id, transcript_id",
+    )
     app.add_argument("reference_chrom_sizes", help="Path to reference chromosome sizes file (tab-separated: chrom_name\tsize)")
     app.add_argument("out_orthologous_regions_mapping", help="Output with orthologous regions")
     app.add_argument("out_classification_table", help="Classification table with predictions")
@@ -331,7 +334,11 @@ def run_toga_mini(
     chains = read_chain_file(chain_file, 25_000)
     print(f"Parsed: {len(chains)} from {chain_file} in {_time_delta(t0)}")
     transcripts = read_bed12_file(transcript_file)
-    gene_data = read_gene_data(isoforms_file, gene_column=1, transcript_id_column=2)
+    gene_data = read_gene_data(
+        isoforms_file,
+        gene_column="gene_id",
+        transcript_id_column="transcript_id",
+    )
     transcripts.bind_gene_data(gene_data)
     print(f"Parsed {len(transcripts)} transcripts from {transcript_file} in {_time_delta(t0)}")
 

@@ -34,7 +34,7 @@ usage: toga_mini.py [-h] chain_file transcript_file isoforms_file reference_chro
 positional arguments:
   chain_file            Path to genome alignment file in chain format
   transcript_file       Path to transcripts bed12 file
-  isoforms_file         Isoforms mapping
+  isoforms_file         Isoforms mapping TSV with columns: gene_id, transcript_id
   reference_chrom_sizes Path to reference chromosome sizes file (tab-separated: chrom_name	size)
   out_orthologous_regions_mapping
                         Output with orthologous regions
@@ -44,6 +44,10 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
  ```
+
+### Isoforms file format
+
+`isoforms_file` must be a TSV with a header row that includes `gene_id` and `transcript_id` columns (see `test_input/hg38.chr21.isoforms.tsv` for an example).
 
 ## 🔗 References
 
