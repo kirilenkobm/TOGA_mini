@@ -110,7 +110,7 @@ def assign_label(pred):
         return ORTH
 
 
-def classify_table(df: pd.DataFrame) -> pd.DataFrame:
+def classify_table(df: pd.DataFrame, se_model_path: str, me_model_path: str) -> pd.DataFrame:
     df = df.copy()
     df["synt_log"] = np.log10(df["synteny"].replace(0, np.nan))
     df["intr_perc"] = df["intr_perc"].fillna(0.0)  # already computed
@@ -120,8 +120,8 @@ def classify_table(df: pd.DataFrame) -> pd.DataFrame:
     df["pred"] = np.nan
     df.loc[(df["exon_perc"] == 0) & (df["synteny"] > 1), "pred"] = SPANNING_SCORE
 
-    se_model = joblib.load(SE_MODEL_PATH)
-    me_model = joblib.load(ME_MODEL_PATH)
+    se_model = joblib.load(se_model_path)
+    me_model = joblib.load(me_model_path)
 
     se_mask = (df["pred"].isna()) & (df["single_exon"] == 1)
     me_mask = (df["pred"].isna()) & (df["single_exon"] == 0)
@@ -309,27 +309,34 @@ def _time_delta(t0: dt):
     return dt.now() - t0
 
 
-def main():
-    args = parse_args()
+def run_toga_mini(
+    chain_file: str,
+    transcript_file: str,
+    isoforms_file: str,
+    reference_chrom_sizes: str,
+    out_orthologous_regions_mapping: str,
+    out_classification_table: str,
+    se_model_path: str,
+    me_model_path: str,
+):
+    ensure_parent_directory(out_orthologous_regions_mapping)
+    ensure_parent_directory(out_classification_table)
 
-    ensure_parent_directory(args.out_orthologous_regions_mapping)
-    ensure_parent_directory(args.out_classification_table)
-
-    if not os.path.isfile(SE_MODEL_PATH) or not os.path.isfile(ME_MODEL_PATH):
+    if not os.path.isfile(se_model_path) or not os.path.isfile(me_model_path):
         print("Error: models not found. Train them with configure.sh script.")
         sys.exit(1)
 
     t0 = dt.now()
     print(f"{t0}: Reading input files...")
-    chains = read_chain_file(args.chain_file, 25_000)
-    print(f"Parsed: {len(chains)} from {args.chain_file} in {_time_delta(t0)}")
-    transcripts = read_bed12_file(args.transcript_file)
-    gene_data = read_gene_data(args.isoforms_file, gene_column=1, transcript_id_column=2)
+    chains = read_chain_file(chain_file, 25_000)
+    print(f"Parsed: {len(chains)} from {chain_file} in {_time_delta(t0)}")
+    transcripts = read_bed12_file(transcript_file)
+    gene_data = read_gene_data(isoforms_file, gene_column=1, transcript_id_column=2)
     transcripts.bind_gene_data(gene_data)
-    print(f"Parsed {len(transcripts)} transcripts from {args.transcript_file} in {_time_delta(t0)}")
+    print(f"Parsed {len(transcripts)} transcripts from {transcript_file} in {_time_delta(t0)}")
 
     reference_chromosomes = transcripts.get_all_chromosomes()
-    reference_chrom_sizes = read_chrom_sizes(args.reference_chrom_sizes)
+    reference_chrom_sizes = read_chrom_sizes(reference_chrom_sizes)
     print(f" Found lengths for {len(reference_chromosomes)} reference chromosomes")
 
     chain_t_chromosomes = chains.get_reference_chromosomes()
@@ -357,11 +364,11 @@ def main():
     print(f"{_time_delta(t0)}: Features extracted. {len(features)} entries in total")
 
     print(f"{_time_delta(t0)}: Classifying table...")
-    classified_df = classify_table(df)
+    classified_df = classify_table(df, se_model_path, me_model_path)
     print(f"{_time_delta(t0)}: Table classified.")
 
     print(f"{_time_delta(t0)}: Writing classification table...")
-    classified_df.to_csv(args.out_classification_table, index=False)
+    classified_df.to_csv(out_classification_table, index=False)
     print(f"{_time_delta(t0)}: Classification table written.")
 
     print(f"{_time_delta(t0)}: Making orthologous regions mapping...")
@@ -372,8 +379,22 @@ def main():
         .to_dict()
     )
     pairs_to_q_intervals = map_orthologs(ortholog_map, chains, transcripts)
-    write_orthologous_regions(pairs_to_q_intervals, chains, transcripts, args.out_orthologous_regions_mapping)
+    write_orthologous_regions(pairs_to_q_intervals, chains, transcripts, out_orthologous_regions_mapping)
     print(f"{_time_delta(t0)}: Orthologous regions mapping written.")
+
+
+def main():
+    args = parse_args()
+    run_toga_mini(
+        args.chain_file,
+        args.transcript_file,
+        args.isoforms_file,
+        args.reference_chrom_sizes,
+        args.out_orthologous_regions_mapping,
+        args.out_classification_table,
+        SE_MODEL_PATH,
+        ME_MODEL_PATH,
+    )
 
 
 if __name__ == "__main__":
